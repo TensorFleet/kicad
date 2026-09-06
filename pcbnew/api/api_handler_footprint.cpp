@@ -349,19 +349,50 @@ HANDLER_RESULT<GetItemsResponse> API_HANDLER_FOOTPRINT::handleGetItems(
 
     GetItemsResponse response;
 
-    FOOTPRINT* footprint = board()->GetFirstFootprint();
     std::vector<BOARD_ITEM*> items;
-    std::set<KICAD_T> typesRequested, typesInserted;
-    bool handledAnything = false;
+    std::set<KICAD_T>        typesRequested;
 
-    for( int typeRaw : aCtx.Request.types() )
+    if( !collectItems( parseRequestedItemTypes( aCtx.Request.types() ), items, typesRequested ) )
     {
-        auto typeMessage = static_cast<common::types::KiCadObjectType>( typeRaw );
-        KICAD_T type = FromProtoEnum<KICAD_T>( typeMessage );
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "none of the requested types are valid for a Footprint object" );
+        return tl::unexpected( e );
+    }
 
-        if( type == TYPE_NOT_INIT )
-            continue;
+    std::erase_if( items,
+                   [&]( const BOARD_ITEM* aItem )
+                   {
+                       return !typesRequested.count( aItem->Type() );
+                   } );
 
+    windowItems( aCtx.Request, items, response,
+                 []( const BOARD_ITEM* aItem ) -> const EDA_ITEM*
+                 {
+                     return aItem;
+                 } );
+
+    for( const BOARD_ITEM* item : items )
+    {
+        google::protobuf::Any itemBuf;
+        item->Serialize( itemBuf );
+        response.mutable_items()->Add( std::move( itemBuf ) );
+    }
+
+    response.set_status( ItemRequestStatus::IRS_OK );
+    return response;
+}
+
+
+bool API_HANDLER_FOOTPRINT::collectItems( const std::vector<KICAD_T>& aTypes, std::vector<BOARD_ITEM*>& items,
+                       std::set<KICAD_T>& typesRequested ) const
+{
+    FOOTPRINT* footprint = board()->GetFirstFootprint();
+    std::set<KICAD_T> typesInserted;
+    bool              handledAnything = false;
+
+    for( KICAD_T type : aTypes )
+    {
         typesRequested.emplace( type );
 
         if( typesInserted.count( type ) )
@@ -501,27 +532,31 @@ HANDLER_RESULT<GetItemsResponse> API_HANDLER_FOOTPRINT::handleGetItems(
             break;
         }
     }
+    return handledAnything;
+}
 
-    if( !handledAnything )
-    {
-        ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
-        e.set_error_message( "none of the requested types are valid for a Footprint object" );
-        return tl::unexpected( e );
-    }
+
+std::map<KICAD_T, uint32_t> API_HANDLER_FOOTPRINT::countItems( const DocumentSpecifier& aDocument )
+{
+    // Every type handleGetItems serves
+    static const std::vector<KICAD_T> allTypes = { PCB_PAD_T,     PCB_FIELD_T, PCB_SHAPE_T,     PCB_TEXT_T,
+                                                   PCB_TEXTBOX_T, PCB_BARCODE_T, PCB_TABLE_T,   PCB_TABLECELL_T,
+                                                   PCB_DIMENSION_T, PCB_ZONE_T, PCB_GROUP_T };
+
+    std::vector<BOARD_ITEM*> items;
+    std::set<KICAD_T>        typesRequested;
+
+    collectItems( allTypes, items, typesRequested );
+
+    std::map<KICAD_T, uint32_t> counts;
 
     for( const BOARD_ITEM* item : items )
     {
-        if( !typesRequested.count( item->Type() ) )
-            continue;
-
-        google::protobuf::Any itemBuf;
-        item->Serialize( itemBuf );
-        response.mutable_items()->Add( std::move( itemBuf ) );
+        if( typesRequested.count( item->Type() ) )
+            ++counts[item->Type()];
     }
 
-    response.set_status( ItemRequestStatus::IRS_OK );
-    return response;
+    return counts;
 }
 
 

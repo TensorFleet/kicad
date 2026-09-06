@@ -1028,4 +1028,112 @@ BOOST_AUTO_TEST_CASE( GetActionsAndHeadlessRunAction )
 }
 
 
+// Since 11.0: GetItems can page its result and return only what changed since a revision;
+// GetItemCounts counts without serializing.
+BOOST_AUTO_TEST_CASE( GetItemsPagingAndChangesSinceRevision )
+{
+    BOARD* board = loadBoard( wxS( "api_kitchen_sink" ) );
+
+    API_HANDLER_PCB handler( m_context );
+
+    auto handle = [&]( const auto& aCommand, auto& aResponse )
+    {
+        kiapi::common::ApiRequest request = makeRequest( aCommand );
+        API_RESULT                result = handler.Handle( request );
+
+        BOOST_REQUIRE_MESSAGE( result.has_value(), "request failed: " << result.error().error_message() );
+        BOOST_REQUIRE( result->message().UnpackTo( &aResponse ) );
+    };
+
+    size_t footprintCount = board->Footprints().size();
+    BOOST_REQUIRE_GT( footprintCount, 2 );
+
+    kiapi::common::commands::GetItemCounts getCounts;
+    *getCounts.mutable_document() = pcbDocument( board );
+
+    kiapi::common::commands::GetItemCountsResponse counts;
+    handle( getCounts, counts );
+
+    std::map<int, uint32_t> byType;
+
+    for( const kiapi::common::commands::ItemCount& count : counts.counts() )
+        byType[count.type()] = count.count();
+
+    BOOST_CHECK_EQUAL( byType[kiapi::common::types::KOT_PCB_FOOTPRINT], footprintCount );
+    BOOST_CHECK_EQUAL( byType[kiapi::common::types::KOT_PCB_TRACE] + byType[kiapi::common::types::KOT_PCB_VIA]
+                               + byType[kiapi::common::types::KOT_PCB_ARC],
+                       board->Tracks().size() );
+    BOOST_CHECK_GT( byType[kiapi::common::types::KOT_PCB_PAD], 0 );
+
+    // A page of footprints
+    kiapi::common::commands::GetItems getItems;
+    *getItems.mutable_header()->mutable_document() = pcbDocument( board );
+    getItems.add_types( kiapi::common::types::KOT_PCB_FOOTPRINT );
+    getItems.mutable_page()->set_offset( 1 );
+    getItems.mutable_page()->set_limit( 2 );
+
+    kiapi::common::commands::GetItemsResponse page;
+    handle( getItems, page );
+    BOOST_CHECK_EQUAL( page.items_size(), 2 );
+    BOOST_CHECK_EQUAL( page.total(), footprintCount );
+
+    getItems.mutable_page()->set_offset( footprintCount - 1 );
+    getItems.mutable_page()->set_limit( 0 );
+    handle( getItems, page );
+    BOOST_CHECK_EQUAL( page.items_size(), 1 );
+
+    // Nothing changed since the current revision
+    getItems.clear_page();
+    getItems.add_types( kiapi::common::types::KOT_PCB_PAD );
+    getItems.set_since_revision( page.revision() );
+    handle( getItems, page );
+    BOOST_CHECK_EQUAL( page.items_size(), 0 );
+    BOOST_CHECK_EQUAL( page.total(), 0 );
+
+    uint64_t before = page.revision();
+
+    // Move one footprint through UpdateItems: it and its pads changed, nothing else
+    FOOTPRINT* footprint = board->Footprints()[0];
+    kiapi::board::types::FootprintInstance moved;
+
+    {
+        google::protobuf::Any any;
+        footprint->Serialize( any );
+        BOOST_REQUIRE( any.UnpackTo( &moved ) );
+        moved.mutable_position()->set_x_nm( moved.position().x_nm() + 1000000 );
+    }
+
+    kiapi::common::commands::UpdateItems update;
+    *update.mutable_header()->mutable_document() = pcbDocument( board );
+    update.add_items()->PackFrom( moved );
+
+    kiapi::common::commands::UpdateItemsResponse updated;
+    handle( update, updated );
+    BOOST_REQUIRE_EQUAL( updated.status(), kiapi::common::types::IRS_OK );
+
+    handle( getItems, page );
+    BOOST_CHECK_EQUAL( page.total(), 1 + footprint->Pads().size() );
+    BOOST_CHECK_EQUAL( page.deleted_ids_size(), 0 );
+    BOOST_CHECK_GT( page.revision(), before );
+
+    // Delete a track: it is reported by id
+    BOOST_REQUIRE( !board->Tracks().empty() );
+    std::string trackId = board->Tracks()[0]->m_Uuid.AsStdString();
+
+    kiapi::common::commands::DeleteItems del;
+    *del.mutable_header()->mutable_document() = pcbDocument( board );
+    del.add_item_ids()->set_value( trackId );
+
+    kiapi::common::commands::DeleteItemsResponse deleted;
+    handle( del, deleted );
+
+    getItems.clear_types();
+    getItems.add_types( kiapi::common::types::KOT_PCB_TRACE );
+    handle( getItems, page );
+    BOOST_CHECK_EQUAL( page.total(), 0 );
+    BOOST_REQUIRE_EQUAL( page.deleted_ids_size(), 1 );
+    BOOST_CHECK_EQUAL( page.deleted_ids( 0 ).value(), trackId );
+}
+
+
 BOOST_AUTO_TEST_SUITE_END()

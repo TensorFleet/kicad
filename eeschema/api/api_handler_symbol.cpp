@@ -360,25 +360,56 @@ HANDLER_RESULT<GetItemsResponse> API_HANDLER_SYMBOL::handleGetItems( const HANDL
         return tl::unexpected( e );
     }
 
+    std::vector<const EDA_ITEM*> items;
+
     if( wantSymbol )
-    {
-        kiapi::schematic::types::SchematicSymbol packed;
-        PackLibSymbol( &packed, symbol() );
-        response.add_items()->PackFrom( packed );
-    }
+        items.push_back( symbol() );
 
     for( const SCH_ITEM& item : symbol()->GetDrawItems() )
     {
-        if( !typesRequested.contains( item.Type() ) )
-            continue;
+        if( typesRequested.contains( item.Type() ) )
+            items.push_back( &item );
+    }
 
-        google::protobuf::Any itemBuf;
-        item.Serialize( itemBuf );
-        response.mutable_items()->Add( std::move( itemBuf ) );
+    windowItems( aCtx.Request, items, response,
+                 []( const EDA_ITEM* aItem )
+                 {
+                     return aItem;
+                 } );
+
+    for( const EDA_ITEM* item : items )
+    {
+        if( item == symbol() )
+        {
+            kiapi::schematic::types::SchematicSymbol packed;
+            PackLibSymbol( &packed, symbol() );
+            response.add_items()->PackFrom( packed );
+        }
+        else
+        {
+            google::protobuf::Any itemBuf;
+            item->Serialize( itemBuf );
+            response.mutable_items()->Add( std::move( itemBuf ) );
+        }
     }
 
     response.set_status( ItemRequestStatus::IRS_OK );
     return response;
+}
+
+
+std::map<KICAD_T, uint32_t> API_HANDLER_SYMBOL::countItems( const DocumentSpecifier& aDocument )
+{
+    std::map<KICAD_T, uint32_t> counts;
+    counts[LIB_SYMBOL_T] = 1;
+
+    for( const SCH_ITEM& item : symbol()->GetDrawItems() )
+    {
+        if( s_symbolChildTypes.contains( item.Type() ) )
+            ++counts[item.Type()];
+    }
+
+    return counts;
 }
 
 

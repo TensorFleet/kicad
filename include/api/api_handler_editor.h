@@ -30,6 +30,10 @@
 #include <google/protobuf/empty.pb.h>
 #include <kiid.h>
 #include <page_info.h>
+#include <algorithm>
+#include <deque>
+#include <eda_item.h>
+#include <map>
 #include <set>
 #include <vector>
 
@@ -105,6 +109,80 @@ protected:
 
     HANDLER_RESULT<commands::DocumentRevisionResponse> handleGetDocumentRevision(
             const HANDLER_CONTEXT<commands::GetDocumentRevision>& aCtx );
+
+    HANDLER_RESULT<commands::GetItemCountsResponse> handleGetItemCounts(
+            const HANDLER_CONTEXT<commands::GetItemCounts>& aCtx );
+
+    /**
+     * @return the number of items of each type in the (validated) document, as GetItems would
+     *         return them.  Types with no items may be omitted.
+     */
+    virtual std::map<KICAD_T, uint32_t> countItems( const DocumentSpecifier& aDocument ) { return {}; }
+
+    /// What changed in one revision step; see changesSince
+    struct REVISION_CHANGES
+    {
+        uint64_t          Revision;    ///< The revision these changes produced
+        bool              Complete;    ///< false if the change could not be attributed to items
+        std::vector<KIID> Changed;     ///< Created or modified items
+        std::vector<KIID> Deleted;
+    };
+
+    /**
+     * Collect what changed after revision aRevision from the bounded change log.
+     * @return std::nullopt if the log does not cover the range or a change in it could not be
+     *         attributed to items (the caller must assume everything changed)
+     */
+    std::optional<REVISION_CHANGES> changesSince( uint64_t aRevision ) const;
+
+    /**
+     * Apply GetItems.since_revision and GetItems.page to a list of items about to be packed,
+     * and fill the response's total / revision / deleted_ids.
+     *
+     * @param aItems is the full list of matching items, reduced in place to the window
+     * @param aGetItem maps an entry of aItems to its EDA_ITEM (items are matched through their
+     *                 ancestors too, so a changed footprint yields its pads)
+     */
+    template <typename T, typename GETTER>
+    void windowItems( const commands::GetItems& aRequest, std::vector<T>& aItems,
+                      commands::GetItemsResponse& aResponse, GETTER aGetItem )
+    {
+        if( aRequest.has_since_revision() )
+        {
+            if( std::optional<REVISION_CHANGES> changes = changesSince( aRequest.since_revision() ) )
+            {
+                std::set<KIID> changed( changes->Changed.begin(), changes->Changed.end() );
+
+                std::erase_if( aItems,
+                               [&]( const T& aEntry )
+                               {
+                                   for( const EDA_ITEM* item = aGetItem( aEntry ); item; item = item->GetParent() )
+                                   {
+                                       if( changed.contains( item->m_Uuid ) )
+                                           return false;
+                                   }
+
+                                   return true;
+                               } );
+
+                for( const KIID& id : changes->Deleted )
+                    aResponse.add_deleted_ids()->set_value( id.AsStdString() );
+            }
+        }
+
+        aResponse.set_total( static_cast<uint32_t>( aItems.size() ) );
+        aResponse.set_revision( m_revision );
+
+        if( aRequest.has_page() )
+        {
+            size_t offset = std::min<size_t>( aRequest.page().offset(), aItems.size() );
+            size_t limit = aRequest.page().limit() == 0 ? aItems.size() - offset
+                                                         : std::min<size_t>( aRequest.page().limit(), aItems.size() - offset );
+
+            aItems.erase( aItems.begin() + offset + limit, aItems.end() );
+            aItems.erase( aItems.begin(), aItems.begin() + offset );
+        }
+    }
 
     /**
      * Record that the document was changed (or reverted) so that GetDocumentRevision reports a
@@ -260,6 +338,15 @@ protected:
 
     /// Document revision counter reported by GetDocumentRevision; see bumpRevision
     uint64_t m_revision;
+
+private:
+    /// Advance m_revision and log what changed; every revision step goes through here
+    void advanceRevision( bool aComplete, const COMMIT* aCommit );
+
+    /// The most recent revision steps, oldest first; see changesSince
+    std::deque<REVISION_CHANGES> m_revisionChanges;
+
+    static constexpr size_t MAX_REVISION_CHANGES = 256;
 };
 
 #endif //KICAD_API_HANDLER_EDITOR_H

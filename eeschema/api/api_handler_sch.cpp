@@ -1111,23 +1111,74 @@ HANDLER_RESULT<GetItemsResponse> API_HANDLER_SCH::handleGetItems( const HANDLER_
     GetItemsResponse response;
     google::protobuf::Any any;
 
+    std::vector<std::pair<EDA_ITEM*, SCH_SHEET_PATH>> ordered;
+
     for( KICAD_T type : parseRequestedItemTypes( aCtx.Request.types() ) )
     {
         if( !s_allowedTypes.contains( type ) )
             continue;
 
-        if( typesInserted.contains( type ) )
+        if( !typesInserted.insert( type ).second )
             continue;
 
-        for( const auto& [item, itemPath] : itemMap[type] )
-        {
-            if( packSchItem( any, static_cast<SCH_ITEM*>( item ), itemPath ) )
-                response.mutable_items()->Add( std::move( any ) );
-        }
+        ordered.insert( ordered.end(), itemMap[type].begin(), itemMap[type].end() );
+    }
+
+    windowItems( aCtx.Request, ordered, response,
+                 []( const std::pair<EDA_ITEM*, SCH_SHEET_PATH>& aEntry ) -> const EDA_ITEM*
+                 {
+                     return aEntry.first;
+                 } );
+
+    for( const auto& [item, itemPath] : ordered )
+    {
+        if( packSchItem( any, static_cast<SCH_ITEM*>( item ), itemPath ) )
+            response.mutable_items()->Add( std::move( any ) );
     }
 
     response.set_status( ItemRequestStatus::IRS_OK );
     return response;
+}
+
+
+std::map<KICAD_T, uint32_t> API_HANDLER_SCH::countItems( const DocumentSpecifier& aDocument )
+{
+    std::map<KICAD_T, uint32_t> counts;
+    SCH_SHEET_LIST              hierarchy = schematic()->Hierarchy();
+
+    auto countScreen =
+            [&]( const SCH_SHEET_PATH& aPath )
+            {
+                for( SCH_ITEM* item : aPath.LastScreen()->Items() )
+                {
+                    if( s_allowedTypes.contains( item->Type() ) )
+                        ++counts[item->Type()];
+
+                    item->RunOnChildren(
+                            [&]( SCH_ITEM* aChild )
+                            {
+                                if( s_allowedTypes.contains( aChild->Type() ) )
+                                    ++counts[aChild->Type()];
+                            },
+                            RECURSE_MODE::NO_RECURSE );
+                }
+            };
+
+    // The sheet the document names, or every sheet, as GetItems does
+    if( aDocument.has_sheet_path() )
+    {
+        KIID_PATH kp = UnpackSheetPath( aDocument.sheet_path() );
+
+        if( std::optional<SCH_SHEET_PATH> path = hierarchy.GetSheetPathByKIIDPath( kp ) )
+            countScreen( *path );
+    }
+    else
+    {
+        for( const SCH_SHEET_PATH& path : hierarchy )
+            countScreen( path );
+    }
+
+    return counts;
 }
 
 

@@ -78,6 +78,8 @@ private:
 
     HANDLER_RESULT<commands::GetItemsResponse> handleGetItems( const HANDLER_CONTEXT<commands::GetItems>& aCtx );
 
+    std::map<KICAD_T, uint32_t> countItems( const DocumentSpecifier& aDocument ) override;
+
     HANDLER_RESULT<commands::GetItemsResponse> handleGetItemsById(
             const HANDLER_CONTEXT<commands::GetItemsById>& aCtx );
 
