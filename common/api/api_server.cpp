@@ -18,6 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <algorithm>
 #include <map>
 
 #include <fmt/format.h>
@@ -95,7 +96,7 @@ KICAD_API_SERVER::KICAD_API_SERVER( bool aAutoStart ) :
         m_readyToReply( false ),
         m_requestPending( false )
 {
-    m_handlers.insert( m_serverHandler.get() );
+    m_handlers.push_back( m_serverHandler.get() );
     m_serverHandler->attachServer( this );
 
     if( !aAutoStart )
@@ -283,8 +284,10 @@ void KICAD_API_SERVER::RegisterHandler( API_HANDLER* aHandler )
 {
     wxCHECK( aHandler, /* void */ );
 
-    if( !m_handlers.insert( aHandler ).second )
+    if( std::ranges::find( m_handlers, aHandler ) != m_handlers.end() )
         return;
+
+    m_handlers.push_back( aHandler );
 
     aHandler->attachServer( this );
 
@@ -302,8 +305,12 @@ void KICAD_API_SERVER::DeregisterHandler( API_HANDLER* aHandler )
     if( aHandler == m_serverHandler.get() )
         return;
 
-    if( m_handlers.erase( aHandler ) == 0 )
+    auto it = std::ranges::find( m_handlers, aHandler );
+
+    if( it == m_handlers.end() )
         return;
+
+    m_handlers.erase( it );
 
     if( std::optional<kiapi::common::types::DocumentSpecifier> doc = aHandler->Document() )
     {
@@ -472,17 +479,7 @@ void KICAD_API_SERVER::handleApiRequestString( std::string& aRequestString )
         return;
     }
 
-    API_RESULT result;
-
-    for( API_HANDLER* handler : m_handlers )
-    {
-        result = handler->Handle( request );
-
-        if( result.has_value() )
-            break;
-        else if( result.error().status() != ApiStatusCode::AS_UNHANDLED )
-            break;
-    }
+    API_RESULT result = Dispatch( request );
 
     // Note: at the point we call Reply(), we no longer own requestString.
 
@@ -513,6 +510,26 @@ void KICAD_API_SERVER::handleApiRequestString( std::string& aRequestString )
         if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
             log( "Response (ERROR): " + error.Utf8DebugString() );
     }
+}
+
+
+API_RESULT KICAD_API_SERVER::Dispatch( ApiRequest& aRequest )
+{
+    API_RESULT result;
+
+    // Indexed rather than iterator-based: a handler may register or deregister other handlers
+    // while it runs (OpenDocument / CloseDocument), which invalidates iterators.
+    for( size_t i = 0; i < m_handlers.size(); ++i )
+    {
+        result = m_handlers[i]->Handle( aRequest );
+
+        if( result.has_value() )
+            break;
+        else if( result.error().status() != ApiStatusCode::AS_UNHANDLED )
+            break;
+    }
+
+    return result;
 }
 
 

@@ -375,13 +375,28 @@ void API_HANDLER_EDITOR::notifyDocumentSaved( const wxString& aPath )
 
 HANDLER_RESULT<bool> API_HANDLER_EDITOR::validateDocument( const DocumentSpecifier& aDocument )
 {
-    if( !validateDocumentInternal( aDocument ) )
+    // Another editor's document: answer AS_UNHANDLED so that the API server passes the request
+    // on to that editor's handler instead of failing it here.
+    if( aDocument.type() != thisDocumentType() )
     {
         ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
-        e.set_error_message( fmt::format( "the requested document {} is not open",
-                                          aDocument.board_filename() ) );
+        e.set_status( ApiStatusCode::AS_UNHANDLED );
+        // No error message, this is a flag that the server should try a different handler
         return tl::unexpected( e );
+    }
+
+    if( tl::expected<bool, ApiResponseStatus> result = validateDocumentInternal( aDocument ); !result )
+    {
+        if( result.error().status() != ApiStatusCode::AS_UNHANDLED && result.error().error_message().empty() )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( fmt::format( "the requested document {} is not open",
+                                              aDocument.board_filename() ) );
+            return tl::unexpected( e );
+        }
+
+        return tl::unexpected( result.error() );
     }
 
     return true;
@@ -601,7 +616,7 @@ API_HANDLER_EDITOR::handleGetTitleBlockInfo( const HANDLER_CONTEXT<GetTitleBlock
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    std::optional<TITLE_BLOCK*> optBlock = getTitleBlock();
+    std::optional<TITLE_BLOCK*> optBlock = getTitleBlock( aCtx.Request.document() );
 
     if( !optBlock )
     {
@@ -649,7 +664,7 @@ API_HANDLER_EDITOR::handleSetTitleBlockInfo( const HANDLER_CONTEXT<SetTitleBlock
         return tl::unexpected( e );
     }
 
-    std::optional<TITLE_BLOCK*> optBlock = getTitleBlock();
+    std::optional<TITLE_BLOCK*> optBlock = getTitleBlock( aCtx.Request.document() );
 
     if( !optBlock )
     {
@@ -691,7 +706,7 @@ HANDLER_RESULT<types::PageSettings> API_HANDLER_EDITOR::handleGetPageSettings(
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    std::optional<PAGE_INFO> optPageInfo = getPageSettings();
+    std::optional<PAGE_INFO> optPageInfo = getPageSettings( aCtx.Request.document() );
 
     if( !optPageInfo )
     {
@@ -733,7 +748,7 @@ HANDLER_RESULT<types::PageSettings> API_HANDLER_EDITOR::handleSetPageSettings(
         return tl::unexpected( e );
     }
 
-    std::optional<PAGE_INFO> optPageInfo = getPageSettings();
+    std::optional<PAGE_INFO> optPageInfo = getPageSettings( aCtx.Request.document() );
 
     if( !optPageInfo )
     {
@@ -770,7 +785,7 @@ HANDLER_RESULT<types::PageSettings> API_HANDLER_EDITOR::handleSetPageSettings(
         pageInfo.SetType( pageSizeType, portrait );
     }
 
-    if( !setPageSettings( pageInfo ) )
+    if( !setPageSettings( aCtx.Request.document(), pageInfo ) )
     {
         ApiResponseStatus e;
         e.set_status( AS_BAD_REQUEST );

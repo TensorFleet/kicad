@@ -36,6 +36,7 @@
 #include <api/api_server.h>
 #include <api/headless_pcb_context.h>
 #include <api/common/commands/base_commands.pb.h>
+#include <api/common/commands/editor_commands.pb.h>
 #include <api/common/envelope.pb.h>
 
 #include <board.h>
@@ -189,6 +190,53 @@ BOOST_AUTO_TEST_CASE( GetSupportedCommandsIsServedThroughHandlers )
     std::string discovery = typeUrl( kiapi::common::commands::GetSupportedCommands() );
     BOOST_REQUIRE( commands.contains( discovery ) );
 
+    m_server.DeregisterHandler( &m_commonHandler );
+}
+
+
+// Since 11.0: handlers are consulted in registration order, and a handler must decline (with
+// AS_UNHANDLED) a document it does not own so that the next handler can answer.
+BOOST_AUTO_TEST_CASE( DispatchTriesHandlersInRegistrationOrder )
+{
+    loadBoard( wxS( "issue5830" ) );
+
+    API_HANDLER_PCB pcbHandler( m_context );
+
+    m_server.RegisterHandler( &m_commonHandler );
+    m_server.RegisterHandler( &pcbHandler );
+
+    // A command both editors serve, addressed to a schematic: the board handler must not answer
+    // "document is not open" for it.
+    kiapi::common::commands::GetTitleBlockInfo command;
+    command.mutable_document()->set_type( kiapi::common::types::DOCTYPE_SCHEMATIC );
+    command.mutable_document()->mutable_project()->set_name( "issue5830" );
+
+    kiapi::common::ApiRequest request;
+    request.mutable_header()->set_client_name( "kicad.qa" );
+    request.mutable_message()->PackFrom( command );
+
+    API_RESULT result = m_server.Dispatch( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_UNHANDLED );
+
+    // The same command for the open board is answered by the board handler
+    command.mutable_document()->set_type( kiapi::common::types::DOCTYPE_PCB );
+    command.mutable_document()->set_board_filename( "issue5830.kicad_pcb" );
+    request.mutable_message()->PackFrom( command );
+
+    result = m_server.Dispatch( request );
+    BOOST_REQUIRE_MESSAGE( result.has_value(), result.error().error_message() );
+
+    // A board that is not open is still a bad request, with a message
+    command.mutable_document()->set_board_filename( "other.kicad_pcb" );
+    request.mutable_message()->PackFrom( command );
+
+    result = m_server.Dispatch( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_BAD_REQUEST );
+    BOOST_CHECK( !result.error().error_message().empty() );
+
+    m_server.DeregisterHandler( &pcbHandler );
     m_server.DeregisterHandler( &m_commonHandler );
 }
 

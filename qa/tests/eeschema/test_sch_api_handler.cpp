@@ -119,6 +119,54 @@ BOOST_AUTO_TEST_CASE( RevertDocumentRejectedWithOpenCommit )
 
 
 
+// Since 11.0: title blocks are per sheet, resolved from the document's sheet_path; headless the
+// root sheet is the default.  A board document is declined so the board handler can answer.
+BOOST_AUTO_TEST_CASE( TitleBlockResolvesSheetHeadless )
+{
+    SCHEMATIC* schematic = loadSchematic( wxS( "api_kitchen_sink" ) );
+
+    API_HANDLER_SCH handler( m_context );
+
+    SCH_SHEET_LIST hierarchy = schematic->Hierarchy();
+    BOOST_REQUIRE_GE( hierarchy.size(), 2 );
+
+    kiapi::common::commands::SetTitleBlockInfo setCommand;
+    *setCommand.mutable_document() = makeDocument( *schematic );
+    kiapi::common::PackSheetPath( *setCommand.mutable_document()->mutable_sheet_path(), hierarchy.at( 1 ).Path() );
+    setCommand.mutable_title_block()->set_title( "sub sheet" );
+
+    kiapi::common::ApiRequest request;
+    request.mutable_header()->set_client_name( "kicad.qa" );
+    BOOST_REQUIRE( request.mutable_message()->PackFrom( setCommand ) );
+
+    API_RESULT result = handler.Handle( request );
+    BOOST_REQUIRE_MESSAGE( result.has_value(), result.error().error_message() );
+
+    BOOST_CHECK_EQUAL( hierarchy.at( 1 ).LastScreen()->GetTitleBlock().GetTitle().ToStdString(), "sub sheet" );
+    BOOST_CHECK_NE( hierarchy.at( 0 ).LastScreen()->GetTitleBlock().GetTitle().ToStdString(), "sub sheet" );
+
+    // No sheet path: the root sheet
+    kiapi::common::commands::GetTitleBlockInfo getCommand;
+    *getCommand.mutable_document() = makeDocument( *schematic );
+    BOOST_REQUIRE( request.mutable_message()->PackFrom( getCommand ) );
+
+    result = handler.Handle( request );
+    BOOST_REQUIRE_MESSAGE( result.has_value(), result.error().error_message() );
+
+    kiapi::common::types::TitleBlockInfo info;
+    BOOST_REQUIRE( result->message().UnpackTo( &info ) );
+    BOOST_CHECK_EQUAL( info.title(), hierarchy.at( 0 ).LastScreen()->GetTitleBlock().GetTitle().ToStdString() );
+
+    // Another editor's document is passed on rather than rejected
+    getCommand.mutable_document()->set_type( kiapi::common::types::DocumentType::DOCTYPE_PCB );
+    BOOST_REQUIRE( request.mutable_message()->PackFrom( getCommand ) );
+
+    result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_UNHANDLED );
+}
+
+
 BOOST_AUTO_TEST_CASE( CustomPropertyCannotDuplicateSystemProperty )
 {
     SCHEMATIC* schematic = loadSchematic( wxS( "api_kitchen_sink" ) );

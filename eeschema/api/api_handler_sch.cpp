@@ -1516,24 +1516,60 @@ std::optional<EDA_ITEM*> API_HANDLER_SCH::getItemFromDocument( const DocumentSpe
 }
 
 
-std::optional<TITLE_BLOCK*> API_HANDLER_SCH::getTitleBlock()
+std::optional<SCH_SHEET_PATH> API_HANDLER_SCH::resolveSheet( const DocumentSpecifier& aDocument ) const
 {
-    wxCHECK( m_context->GetCurrentSheet(), std::nullopt );
-    return &m_context->GetCurrentSheet()->LastScreen()->GetTitleBlock();
+    if( !schematic() || !schematic()->IsValid() )
+        return std::nullopt;
+
+    if( aDocument.has_sheet_path() )
+    {
+        KIID_PATH path = UnpackSheetPath( aDocument.sheet_path() );
+
+        if( std::optional<SCH_SHEET_PATH> resolved = schematic()->Hierarchy().GetSheetPathByKIIDPath( path ) )
+            return resolved;
+    }
+
+    if( std::optional<SCH_SHEET_PATH> current = m_context->GetCurrentSheet() )
+        return current;
+
+    // Headless: the root sheet
+    if( schematic()->Hierarchy().empty() )
+        return std::nullopt;
+
+    return schematic()->Hierarchy().at( 0 );
 }
 
 
-std::optional<PAGE_INFO> API_HANDLER_SCH::getPageSettings()
+std::optional<TITLE_BLOCK*> API_HANDLER_SCH::getTitleBlock( const DocumentSpecifier& aDocument )
 {
-    wxCHECK( m_context->GetCurrentSheet(), std::nullopt );
-    return m_context->GetCurrentSheet()->LastScreen()->GetPageSettings();
+    std::optional<SCH_SHEET_PATH> sheet = resolveSheet( aDocument );
+
+    if( !sheet || !sheet->LastScreen() )
+        return std::nullopt;
+
+    return &sheet->LastScreen()->GetTitleBlock();
 }
 
 
-bool API_HANDLER_SCH::setPageSettings( const PAGE_INFO& aPageInfo )
+std::optional<PAGE_INFO> API_HANDLER_SCH::getPageSettings( const DocumentSpecifier& aDocument )
 {
-    wxCHECK( m_context->GetCurrentSheet(), false );
-    m_context->GetCurrentSheet()->LastScreen()->SetPageSettings( aPageInfo );
+    std::optional<SCH_SHEET_PATH> sheet = resolveSheet( aDocument );
+
+    if( !sheet || !sheet->LastScreen() )
+        return std::nullopt;
+
+    return sheet->LastScreen()->GetPageSettings();
+}
+
+
+bool API_HANDLER_SCH::setPageSettings( const DocumentSpecifier& aDocument, const PAGE_INFO& aPageInfo )
+{
+    std::optional<SCH_SHEET_PATH> sheet = resolveSheet( aDocument );
+
+    if( !sheet || !sheet->LastScreen() )
+        return false;
+
+    sheet->LastScreen()->SetPageSettings( aPageInfo );
     return true;
 }
 
