@@ -25,6 +25,7 @@
 #include <vector>
 
 #include <api/api_handler_common.h>
+#include <api/api_handler_library.h>
 #include <api/api_utils.h>
 #include <api/api_server.h>
 #include <build_version.h>
@@ -126,6 +127,41 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
         server->Publish( std::move( event ) );
     };
 
+    // The library commands are served by the pcbnew and eeschema kifaces for the open project;
+    // both are told when it opens and closes.  Failure to load a face is not fatal here.  The
+    // design block tables have no kiface of their own and are served (tables only) from here.
+    std::unique_ptr<API_HANDLER_LIBRARY> designBlockLibraries;
+
+    auto notifyProjectFaces = [&]( const wxFileName& aProjectPath, bool aOpened )
+    {
+        if( designBlockLibraries )
+        {
+            server->DeregisterHandler( designBlockLibraries.get() );
+            designBlockLibraries.reset();
+        }
+
+        if( aOpened )
+        {
+            designBlockLibraries = std::make_unique<API_HANDLER_LIBRARY>( LIBRARY_TABLE_TYPE::DESIGN_BLOCK, nullptr,
+                                                                           &Pgm().GetSettingsManager().Prj() );
+            server->RegisterHandler( designBlockLibraries.get() );
+        }
+
+        KIFACE::DOCUMENT_SPEC spec;
+        spec.kind = KIFACE::DOCUMENT_SPEC::KIND::PROJECT_KIND;
+        spec.path = aProjectPath.GetFullPath();
+
+        for( KIWAY::FACE_T face : { KIWAY::FACE_PCB, KIWAY::FACE_SCH } )
+        {
+            wxString error;
+            bool     ok = aOpened ? aKiway.ProcessApiOpenDocument( face, spec, server.get(), &error )
+                                  : aKiway.ProcessApiCloseDocument( face, spec, server.get(), &error );
+
+            if( !ok )
+                wxLogTrace( traceApi, "Project %s notification failed: %s", aOpened ? "open" : "close", error );
+        }
+    };
+
     // How the kiface addresses a document: library items by LIB_ID, files by name.  The kiface
     // owns the truth about what is open (OpenLibraryItem can switch the open library item), so
     // aExact = false closes whatever document of that kind it has.
@@ -169,6 +205,8 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
 
         if( openProjectPath )
         {
+            notifyProjectFaces( *openProjectPath, false );
+
             PROJECT& project = Pgm().GetSettingsManager().Prj();
             publishProjectEvent( project, false );
             Pgm().GetSettingsManager().UnloadProject( &project, false );
@@ -297,6 +335,7 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
 
                 openProjectPath = projectPath;
                 publishProjectEvent( Pgm().GetSettingsManager().Prj(), true );
+                notifyProjectFaces( projectPath, true );
             }
 
             if( std::ranges::find_if( openDocuments,
@@ -373,7 +412,10 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
 
         // Opening a board or schematic implicitly opens its project
         if( !openProjectPath )
+        {
             publishProjectEvent( Pgm().GetSettingsManager().Prj(), true );
+            notifyProjectFaces( projectPath, true );
+        }
 
         openProjectPath = projectPath;
 
@@ -492,6 +534,8 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
 
         if( openDocuments.empty() && openProjectPath )
         {
+            notifyProjectFaces( *openProjectPath, false );
+
             PROJECT& project = Pgm().GetSettingsManager().Prj();
             publishProjectEvent( project, false );
             Pgm().GetSettingsManager().UnloadProject( &project, false );

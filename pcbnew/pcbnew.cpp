@@ -30,6 +30,7 @@
 #include <api/api_server.h>
 #include <api/api_utils.h>
 #include <api/cross_probe_client.h>
+#include <api/api_handler_footprint_library.h>
 #include <api/headless_footprint_context.h>
 #include <api/headless_pcb_context.h>
 #include <kiface_base.h>
@@ -607,6 +608,9 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
     bool handleOpenFootprint( const wxString& aProjectPath, const wxString& aLibIdStr, KICAD_API_SERVER* aServer,
                               wxString* aError );
 
+    /// Serve the footprint library commands for the project at aProjectPath.  Since 11.0.
+    bool handleOpenProject( const wxString& aProjectPath, KICAD_API_SERVER* aServer, wxString* aError );
+
     void PreloadLibraries( KIWAY* aKiway ) override;
     void ProjectChanged() override;
     void CancelPreload( bool aBlock = true ) override;
@@ -622,7 +626,10 @@ private:
 
     void closeCurrentFootprint( KICAD_API_SERVER* aServer );
 
+    void closeCurrentProject( KICAD_API_SERVER* aServer );
+
     KIWAY* m_kiway = nullptr;
+    std::unique_ptr<API_HANDLER_FOOTPRINT_LIBRARY>  m_openLibraryHandler;
     std::shared_ptr<HEADLESS_PCB_CONTEXT>       m_openContext;
     std::unique_ptr<API_HANDLER_PCB>            m_openHandler;
     std::shared_ptr<HEADLESS_FOOTPRINT_CONTEXT> m_openFpContext;
@@ -888,12 +895,27 @@ void IFACE::closeCurrentFootprint( KICAD_API_SERVER* aServer )
 }
 
 
+void IFACE::closeCurrentProject( KICAD_API_SERVER* aServer )
+{
+    if( m_openLibraryHandler )
+    {
+        if( aServer )
+            aServer->DeregisterHandler( m_openLibraryHandler.get() );
+
+        m_openLibraryHandler.reset();
+    }
+}
+
+
 bool IFACE::HandleApiOpenDocument( const DOCUMENT_SPEC& aSpec, KICAD_API_SERVER* aServer, wxString* aError )
 {
     wxCHECK( aServer, false );
 
     if( aSpec.kind == DOCUMENT_SPEC::KIND::FPID_KIND )
         return handleOpenFootprint( aSpec.path, aSpec.libId.GetUniStringLibId(), aServer, aError );
+
+    if( aSpec.kind == DOCUMENT_SPEC::KIND::PROJECT_KIND )
+        return handleOpenProject( aSpec.path, aServer, aError );
 
     if( aSpec.path.IsEmpty() )
     {
@@ -975,6 +997,38 @@ bool IFACE::handleOpenFootprint( const wxString& aProjectPath, const wxString& a
     m_openFpHandler = std::make_unique<API_HANDLER_FOOTPRINT>( m_openFpContext, nullptr );
     aServer->RegisterHandler( m_openFpHandler.get() );
 
+    return true;
+}
+
+
+bool IFACE::handleOpenProject( const wxString& aProjectPath, KICAD_API_SERVER* aServer, wxString* aError )
+{
+    wxFileName projectPath( aProjectPath );
+    projectPath.MakeAbsolute();
+
+    SETTINGS_MANAGER& settingsManager = Pgm().GetSettingsManager();
+    PROJECT*          project = settingsManager.GetProject( projectPath.GetFullPath() );
+
+    if( !project )
+    {
+        if( !settingsManager.LoadProject( projectPath.GetFullPath(), true ) )
+            wxLogTrace( traceApi, "Warning: no project file found for %s", aProjectPath );
+
+        project = settingsManager.GetProject( projectPath.GetFullPath() );
+    }
+
+    if( !project )
+    {
+        if( aError )
+            *aError = wxString::Format( wxS( "Error loading project for %s" ), aProjectPath );
+
+        return false;
+    }
+
+    closeCurrentProject( aServer );
+
+    m_openLibraryHandler = std::make_unique<API_HANDLER_FOOTPRINT_LIBRARY>( project );
+    aServer->RegisterHandler( m_openLibraryHandler.get() );
     return true;
 }
 
@@ -1081,6 +1135,12 @@ bool IFACE::handleOpenPcb( const wxString& aPath, KICAD_API_SERVER* aServer, wxS
 bool IFACE::HandleApiCloseDocument( const DOCUMENT_SPEC& aSpec, KICAD_API_SERVER* aServer, wxString* aError )
 {
     wxCHECK( aServer, false );
+
+    if( aSpec.kind == DOCUMENT_SPEC::KIND::PROJECT_KIND )
+    {
+        closeCurrentProject( aServer );
+        return true;
+    }
 
     if( aSpec.kind == DOCUMENT_SPEC::KIND::FPID_KIND )
     {

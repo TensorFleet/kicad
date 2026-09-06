@@ -20,10 +20,12 @@
 
 #include <algorithm>
 #include <set>
+#include <unordered_map>
 #include <trace_helpers.h>
 
 #include <sch_pin.h>
 #include <lib_symbol.h>
+#include <pin_map.h>
 #include <schematic.h>
 #include <sch_symbol.h>
 #include <sch_bitmap.h>
@@ -670,4 +672,140 @@ void PackLibSymbol( kiapi::schematic::types::SchematicSymbol* aOutput, const LIB
         protoName->set_unit( unit );
         protoName->set_name( displayName.ToUTF8() );
     }
+}
+
+
+std::unique_ptr<LIB_SYMBOL> UnpackLibSymbol( const kiapi::schematic::types::SchematicSymbol& def,
+                                             std::unordered_map<KIID, wxString>* aPinAlternates )
+{
+    using namespace kiapi::common;
+    using namespace kiapi::common::types;
+    using namespace kiapi::schematic::types;
+
+    LIB_ID libId = UnpackLibId( def.id() );
+
+    std::unique_ptr<LIB_SYMBOL> libSymbol = std::make_unique<LIB_SYMBOL>( libId.GetLibItemName() );
+    libSymbol->SetLibId( libId );
+
+
+    libSymbol->GetField( FIELD_T::REFERENCE )->Deserialize( def.reference_field(), schIUScale );
+    libSymbol->GetField( FIELD_T::VALUE )->Deserialize( def.value_field(), schIUScale );
+    libSymbol->GetField( FIELD_T::FOOTPRINT )->Deserialize( def.footprint_field(), schIUScale );
+    libSymbol->GetField( FIELD_T::DATASHEET )->Deserialize( def.datasheet_field(), schIUScale );
+    libSymbol->GetField( FIELD_T::DESCRIPTION )->Deserialize( def.description_field(), schIUScale );
+
+        for( const SchematicSymbolChild& child : def.items() )
+    {
+        std::optional<KICAD_T> type = TypeNameFromAny( child.item() );
+
+        if( !type )
+            continue;
+
+        std::unique_ptr<EDA_ITEM> item = CreateItemForType( *type, libSymbol.get() );
+
+        if( !item || !item->Deserialize( child.item() ) )
+            continue;
+
+        SCH_ITEM* schItem = static_cast<SCH_ITEM*>( item.release() );
+
+        if( schItem->Type() == SCH_PIN_T )
+        {
+            SchematicPin pinProto;
+
+            if( child.item().UnpackTo( &pinProto ) )
+            {
+                if( aPinAlternates && pinProto.has_active_alternate() )
+                    ( *aPinAlternates )[schItem->m_Uuid] = wxString::FromUTF8( pinProto.active_alternate() );
+            }
+        }
+
+        if( child.has_unit() )
+            schItem->SetUnit( child.unit().unit() );
+
+        if( child.has_body_style() )
+            schItem->SetBodyStyle( child.body_style().style() );
+
+        schItem->SetLayer( LAYER_DEVICE );
+        schItem->SetPrivate( child.is_private() );
+        libSymbol->AddDrawItem( schItem );
+    }
+
+    if( def.unit_count() > 0 )
+        libSymbol->SetUnitCount( def.unit_count(), false );
+
+    if( def.body_style_size() > 0 )
+    {
+        std::vector<wxString> bodyStyleNames;
+
+        for( const SchematicBodyStyle& bodyStyle : def.body_style() )
+            bodyStyleNames.emplace_back( wxString::FromUTF8( bodyStyle.name() ) );
+
+        libSymbol->SetBodyStyleNames( bodyStyleNames );
+        libSymbol->SetBodyStyleCount( static_cast<int>( bodyStyleNames.size() ), false, false );
+    }
+
+    if( !def.keywords().empty() )
+        libSymbol->SetKeyWords( wxString::FromUTF8( def.keywords() ) );
+
+    if( def.footprint_filters_size() > 0 )
+    {
+        wxArrayString filters;
+
+        for( const std::string& filter : def.footprint_filters() )
+            filters.Add( wxString::FromUTF8( filter ) );
+
+        libSymbol->SetFPFilters( filters );
+    }
+
+    libSymbol->SetDuplicatePinNumbersAreJumpers( def.jumpers().duplicate_names_are_jumpered() );
+
+    for( const JumperGroup& group : def.jumpers().groups() )
+    {
+        std::set<wxString> pinNumbers;
+
+        for( const std::string& pinNumber : group.pin_numbers() )
+            pinNumbers.insert( wxString::FromUTF8( pinNumber ) );
+
+        if( !pinNumbers.empty() )
+            libSymbol->JumperPinGroups().push_back( std::move( pinNumbers ) );
+    }
+
+    libSymbol->LockUnits( def.units_locked() );
+    libSymbol->SetAreFontsEmbedded( def.embedded_fonts() );
+
+    for( const SchematicUnitDisplayName& displayName : def.unit_display_names() )
+        libSymbol->GetUnitDisplayNames()[displayName.unit()] = wxString::FromUTF8( displayName.name() );
+
+    if( def.has_pin_maps() )
+    {
+        PIN_MAP_SET pinMapSet;
+
+        for( const PinMap& map : def.pin_maps().pin_maps() )
+        {
+            PIN_MAP pinMap( wxString::FromUTF8( map.name() ) );
+
+            for( const PinMapEntry& entry : map.entries() )
+            {
+                pinMap.SetEntry( wxString::FromUTF8( entry.pin_number() ),
+                                 wxString::FromUTF8( entry.pad_number() ) );
+            }
+
+            pinMapSet.AddOrReplace( std::move( pinMap ) );
+        }
+
+        std::vector<ASSOCIATED_FOOTPRINT> associatedFootprints;
+
+        for( const AssociatedFootprint& footprint : def.pin_maps().associated_footprints() )
+        {
+            ASSOCIATED_FOOTPRINT assoc;
+            assoc.m_FootprintLibId = UnpackLibId( footprint.footprint() );
+            assoc.m_MapName        = wxString::FromUTF8( footprint.map_name() );
+            associatedFootprints.push_back( std::move( assoc ) );
+        }
+
+        libSymbol->SetPinMaps( pinMapSet );
+        libSymbol->SetAssociatedFootprints( std::move( associatedFootprints ) );
+    }
+
+    return libSymbol;
 }

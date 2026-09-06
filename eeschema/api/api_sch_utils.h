@@ -22,6 +22,7 @@
 #define KICAD_API_SCH_UTILS_H
 
 #include <memory>
+#include <unordered_map>
 #include <tl/expected.hpp>
 #include <core/typeinfo.h>
 #include <api/common/envelope.pb.h>
@@ -46,6 +47,16 @@ bool PackSymbol( kiapi::schematic::types::SchematicSymbolInstance* aOutput, cons
  * view is produced by PackSymbol.
  */
 void PackLibSymbol( kiapi::schematic::types::SchematicSymbol* aOutput, const LIB_SYMBOL* aInput );
+
+/**
+ * Build a library symbol from its SchematicSymbol message (the inverse of PackLibSymbol).
+ * @param aPinAlternates receives the active alternate of every pin that has one, keyed by the
+ *                       pin's id, for the caller to apply to a placed symbol
+ *
+ * Since 11.0.
+ */
+std::unique_ptr<LIB_SYMBOL> UnpackLibSymbol( const kiapi::schematic::types::SchematicSymbol& aInput,
+                                             std::unordered_map<KIID, wxString>* aPinAlternates = nullptr );
 
 /**
  * Unpack the geometry, the library definition, fields, and the default-variant attributes that

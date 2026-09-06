@@ -106,6 +106,31 @@ message ServerShutdown
 {
 }
 
+// What part of a project changed; see ProjectChanged
+// Since 11.0
+enum ProjectChangeKind
+{
+  PCK_UNKNOWN = 0;
+  PCK_NET_CLASSES = 1;
+  PCK_TEXT_VARIABLES = 2;
+  PCK_VARIANTS = 3;
+  PCK_SETTINGS = 4;
+  PCK_LIBRARY_TABLES = 5;
+}
+
+// Project-level state (not tied to one document) was changed through the API: net classes,
+// text variables, variants, project settings, or the library tables.
+// Since 11.0
+message ProjectChanged
+{
+  kiapi.common.types.ProjectSpecifier project = 1;
+
+  ProjectChangeKind kind = 2;
+
+  // The client_name of the API client that made the change, if it came from an API request
+  string client_name = 3;
+}
+
 message Event
 {
   // Monotonically increasing per server instance, starting at 1
@@ -119,5 +144,8 @@ message Event
     DocumentSaved document_saved = 5;
     JobProgress job_progress = 6;
     ServerShutdown server_shutdown = 7;
+
+    // Since 11.0
+    ProjectChanged project_changed = 8;
   }
 }
