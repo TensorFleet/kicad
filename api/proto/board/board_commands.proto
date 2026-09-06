@@ -727,6 +727,8 @@ message SetDrcSeverities
 // Since 11.0
 message RatsnestEdge
 {
+  // The net the connection belongs to; name and the board's current net code, as GetNets reports
+  // them
   kiapi.board.types.Net net = 1;
 
   // The connected items (pad, via, track, zone) at each end
