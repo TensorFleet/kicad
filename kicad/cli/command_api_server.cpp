@@ -243,7 +243,12 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
         {
             ApiResponseStatus e;
             e.set_status( ApiStatusCode::AS_UNIMPLEMENTED );
-            e.set_error_message( "Only PCB, schematic, footprint, symbol, and project document types are supported" );
+            e.set_error_message(
+                    requestType == types::DOCTYPE_DRAWING_SHEET
+                            ? "Drawing sheets cannot be opened as a document; they are selected "
+                              "by name through SetPageSettings"
+                            : "Only PCB, schematic, footprint, symbol, and project document "
+                              "types are supported" );
             return tl::unexpected( e );
         }
 
