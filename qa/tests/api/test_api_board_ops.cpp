@@ -284,6 +284,10 @@ BOOST_FIXTURE_TEST_CASE( BoardOpsTeardropsAndFootprints, API_SERVER_E2E_FIXTURE 
         *remove.mutable_board() = board;
         BOOST_REQUIRE_MESSAGE( Send( Client(), remove, &response, &error ), error );
         BOOST_CHECK_EQUAL( response.item_count(), static_cast<uint32_t>( padCount + viaCount ) );
+
+        // The count is of what changed, so removing again reports nothing
+        BOOST_REQUIRE_MESSAGE( Send( Client(), remove, &response, &error ), error );
+        BOOST_CHECK_EQUAL( response.item_count(), 0u );
     }
 
     // Updating from the library accounts for every footprint; the two without a library are missing
