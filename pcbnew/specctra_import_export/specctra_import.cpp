@@ -337,7 +337,8 @@ PCB_VIA* SPECCTRA_DB::makeVIA( WIRE_VIA* aVia, PADSTACK* aPadstack, const POINT&
 // no UI code in this function, throw exception to report problems to the
 // UI handler: void PCB_EDIT_FRAME::ImportSpecctraSession( wxCommandEvent& event )
 
-void SPECCTRA_DB::FromSESSION( BOARD* aBoard, COMMIT& aCommit )
+void SPECCTRA_DB::FromSESSION( BOARD* aBoard, COMMIT& aCommit, bool aReplaceTracks,
+                               std::vector<wxString>* aWarnings )
 {
     m_sessionBoard = aBoard;      // not owned here
 
@@ -352,10 +353,13 @@ void SPECCTRA_DB::FromSESSION( BOARD* aBoard, COMMIT& aCommit )
 
     // Remove unlocked tracks/vias (locked ones stay; they are exported as fixed and omitted
     // from the .ses).
-    for( PCB_TRACK* track : aBoard->Tracks() )
+    if( aReplaceTracks )
     {
-        if( !track->IsLocked() )
-            aCommit.Remove( track );
+        for( PCB_TRACK* track : aBoard->Tracks() )
+        {
+            if( !track->IsLocked() )
+                aCommit.Remove( track );
+        }
     }
 
     aBoard->DeleteMARKERs();
@@ -549,19 +553,38 @@ void SPECCTRA_DB::FromSESSION( BOARD* aBoard, COMMIT& aCommit )
 
     if( skipped > 0 )
     {
-        wxLogWarning( wxString::Format( _( "%d session item(s) were skipped due to unresolved "
-                                           "reference, layer, or padstack." ), skipped ) );
+        wxString msg = wxString::Format( _( "%d session item(s) were skipped due to unresolved "
+                                            "reference, layer, or padstack." ), skipped );
+
+        if( aWarnings )
+            aWarnings->push_back( msg );
+        else
+            wxLogWarning( msg );
     }
 }
 
 
-bool ImportSpecctraSession( BOARD* aBoard, const wxString& fullFileName, COMMIT& aCommit )
+bool ImportSpecctraSession( BOARD* aBoard, const wxString& fullFileName, COMMIT& aCommit,
+                            bool aReplaceTracks, std::vector<wxString>* aWarnings )
 {
     SPECCTRA_DB db;
     LOCALE_IO   toggle;
 
     db.LoadSESSION( fullFileName );
-    db.FromSESSION( aBoard, aCommit );
+    db.FromSESSION( aBoard, aCommit, aReplaceTracks, aWarnings );
+
+    return true;
+}
+
+
+bool ImportSpecctraSession( BOARD* aBoard, LINE_READER& aReader, COMMIT& aCommit, bool aReplaceTracks,
+                            std::vector<wxString>* aWarnings )
+{
+    SPECCTRA_DB db;
+    LOCALE_IO   toggle;
+
+    db.LoadSESSION( &aReader );
+    db.FromSESSION( aBoard, aCommit, aReplaceTracks, aWarnings );
 
     return true;
 }

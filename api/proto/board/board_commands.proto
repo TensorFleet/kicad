@@ -1035,6 +1035,56 @@ message GlobalDeletionResponse
 }
 
 
+//// Specctra session import ////
+
+// Merges a Specctra session (.ses) file, the output of an external autorouter such as
+// Freerouting, into an open board: the session's wires and vias become tracks, arcs and vias,
+// and its placement moves the footprints it names, exactly as the board editor's
+// File > Import > Specctra Session does.  The change is one undoable commit.
+//
+// The session is matched to the board by footprint reference, pad number and net name, and
+// its via padstacks by the names the DSN export gave them, so it must have been routed from a
+// DSN that RunBoardJobExportSpecctra produced from this same board (see that job); nets or
+// layers the board no longer has are reported in the warnings and their items skipped.  Zone
+// fills the router echoes back as polygon wires are ignored, and the board's DRC markers are
+// cleared.  Returns ImportSpecctraSessionResponse
+// Since 11.0
+message ImportSpecctraSession
+{
+  kiapi.common.types.DocumentSpecifier board = 1;
+
+  // Path of the session file.  Ignored when contents is set.
+  string path = 2;
+
+  // The session file's text, for a client that holds it in memory rather than on disk
+  bytes contents = 3;
+
+  // Delete the board's unlocked tracks, arcs and vias before adding the session's, as the
+  // editor does (locked ones were exported as fixed wires and are not in the session).
+  // Otherwise the session's items are added to whatever is on the board.
+  bool replace_existing_tracks = 4;
+}
+
+// Since 11.0
+message ImportSpecctraSessionResponse
+{
+  // Tracks and arcs created
+  uint32 tracks_added = 1;
+
+  uint32 vias_added = 2;
+
+  // Tracks, arcs and vias deleted (only with replace_existing_tracks)
+  uint32 tracks_removed = 3;
+
+  // Footprints the session's placement moved, flipped or rotated
+  uint32 footprints_moved = 4;
+
+  // Problems that did not stop the import, such as items whose net, layer or padstack the
+  // board does not have
+  repeated string warnings = 5;
+}
+
+
 //// Graphics defaults ////
 
 // Replaces the text and line defaults of the listed layer classes (Board Setup > Text &

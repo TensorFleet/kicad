@@ -266,7 +266,13 @@ void SPECCTRA_DB::LoadSESSION( const wxString& aFilename )
 {
     FILE_LINE_READER curr_reader( aFilename );
 
-    PushReader( &curr_reader );
+    LoadSESSION( &curr_reader );
+}
+
+
+void SPECCTRA_DB::LoadSESSION( LINE_READER* aReader )
+{
+    PushReader( aReader );
 
     if( NextTok() != T_LEFT )
         Expecting( T_LEFT );
