@@ -19,12 +19,20 @@
  */
 
 #include <api/api_handler.h>
+#include <api/api_server.h>
 #include <wx/wx.h>
 
 using kiapi::common::ApiRequest, kiapi::common::ApiResponse, kiapi::common::ApiResponseStatus;
 
 
 const wxString API_HANDLER::m_defaultCommitMessage = _( "Modification from API" );
+
+
+void API_HANDLER::publish( const kiapi::common::events::Event& aEvent )
+{
+    if( m_server )
+        m_server->Publish( aEvent );
+}
 
 
 API_RESULT API_HANDLER::Handle( ApiRequest& aMsg )

@@ -27,6 +27,7 @@
 #include <vector>
 #include <wx/string.h>
 #include <undo_redo_container.h>
+#include <functional>
 #include <kiid.h>
 #include <eda_item.h>
 
@@ -140,6 +141,12 @@ public:
     int GetStatus( EDA_ITEM* aItem, BASE_SCREEN *aScreen = nullptr );
 
     EDA_ITEM* GetFirst() const { return m_entries.empty() ? nullptr : m_entries[0].m_item; }
+
+    /**
+     * Visit every staged change, in staging order.  The change type passed to the visitor has the
+     * CHT_DONE flag stripped, so it is one of CHT_ADD, CHT_REMOVE or CHT_MODIFY.
+     */
+    void ForEachEntry( const std::function<void( EDA_ITEM* aItem, CHANGE_TYPE aType )>& aVisitor ) const;
 
 protected:
     struct COMMIT_LINE

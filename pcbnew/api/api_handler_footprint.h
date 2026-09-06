@@ -37,6 +37,8 @@ public:
     API_HANDLER_FOOTPRINT( std::shared_ptr<FOOTPRINT_CONTEXT> aContext,
                            FOOTPRINT_EDIT_FRAME* aFrame = nullptr );
 
+    std::optional<DocumentSpecifier> Document() const override;
+
 private:
     HANDLER_RESULT<Empty> handleOpenLibraryItem( const HANDLER_CONTEXT<commands::OpenLibraryItem>& aCtx );
 

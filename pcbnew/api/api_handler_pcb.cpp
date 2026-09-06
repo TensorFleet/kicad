@@ -217,6 +217,13 @@ HANDLER_RESULT<GetOpenDocumentsResponse> API_HANDLER_PCB::handleGetOpenDocuments
     }
 
     GetOpenDocumentsResponse response;
+    response.mutable_documents()->Add( *Document() );
+    return response;
+}
+
+
+std::optional<DocumentSpecifier> API_HANDLER_PCB::Document() const
+{
     common::types::DocumentSpecifier doc;
 
     wxFileName fn( pcbContext()->GetCurrentFileName() );
@@ -227,8 +234,7 @@ HANDLER_RESULT<GetOpenDocumentsResponse> API_HANDLER_PCB::handleGetOpenDocuments
     doc.mutable_project()->set_name( project().GetProjectName().ToStdString() );
     doc.mutable_project()->set_path( project().GetProjectDirectory().ToStdString() );
 
-    response.mutable_documents()->Add( std::move( doc ) );
-    return response;
+    return doc;
 }
 
 
@@ -244,7 +250,7 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleSaveDocument(
         return tl::unexpected( documentValidation.error() );
 
     pcbContext()->SaveBoard();
-    bumpRevision();
+    notifyDocumentSaved( pcbContext()->GetCurrentFileName() );
     return Empty();
 }
 
@@ -295,7 +301,7 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleSaveCopyOfDocument(
     if( board->GetFileName().Matches( boardPath.GetFullPath() ) )
     {
         pcbContext()->SaveBoard();
-        bumpRevision();
+        notifyDocumentSaved( boardPath.GetFullPath() );
         return Empty();
     }
 

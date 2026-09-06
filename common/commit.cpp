@@ -237,6 +237,13 @@ int COMMIT::GetStatus( EDA_ITEM* aItem, BASE_SCREEN *aScreen )
 }
 
 
+void COMMIT::ForEachEntry( const std::function<void( EDA_ITEM*, CHANGE_TYPE )>& aVisitor ) const
+{
+    for( const COMMIT_LINE& entry : m_entries )
+        aVisitor( entry.m_item, CHANGE_TYPE( entry.m_type & CHT_TYPE ) );
+}
+
+
 void COMMIT::makeEntry( EDA_ITEM* aItem, CHANGE_TYPE aType, EDA_ITEM* aCopy, BASE_SCREEN *aScreen )
 {
     COMMIT_LINE ent;

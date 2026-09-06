@@ -48,6 +48,8 @@ public:
     API_HANDLER_SCH( SCH_EDIT_FRAME* aFrame );
     API_HANDLER_SCH( std::shared_ptr<SCH_CONTEXT> aContext, SCH_EDIT_FRAME* aFrame = nullptr );
 
+    std::optional<DocumentSpecifier> Document() const override;
+
 protected:
     std::optional<ApiResponseStatus> checkForHeadless( const std::string& aCommandName ) const;
 

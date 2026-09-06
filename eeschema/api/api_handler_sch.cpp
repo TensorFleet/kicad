@@ -324,7 +324,7 @@ HANDLER_RESULT<google::protobuf::Empty> API_HANDLER_SCH::handleSaveDocument( con
         return tl::unexpected( e );
     }
 
-    bumpRevision();
+    notifyDocumentSaved( m_context->GetCurrentFileName() );
     return google::protobuf::Empty();
 }
 
@@ -449,9 +449,14 @@ HANDLER_RESULT<GetOpenDocumentsResponse> API_HANDLER_SCH::handleGetOpenDocuments
     }
 
     GetOpenDocumentsResponse response;
-    common::types::DocumentSpecifier doc;
+    response.mutable_documents()->Add( *Document() );
+    return response;
+}
 
-    wxFileName fn( m_context->GetCurrentFileName() );
+
+std::optional<DocumentSpecifier> API_HANDLER_SCH::Document() const
+{
+    common::types::DocumentSpecifier doc;
 
     doc.set_type( DocumentType::DOCTYPE_SCHEMATIC );
 
@@ -460,8 +465,7 @@ HANDLER_RESULT<GetOpenDocumentsResponse> API_HANDLER_SCH::handleGetOpenDocuments
 
     PackProject( *doc.mutable_project(), m_context->Prj() );
 
-    response.mutable_documents()->Add( std::move( doc ) );
-    return response;
+    return doc;
 }
 
 

@@ -20,6 +20,7 @@
 
 #include <kinng.h>
 #include <nng/nng.h>
+#include <nng/protocol/pubsub0/pub.h>
 #include <nng/protocol/reqrep0/rep.h>
 #include <wx/log.h>
 
@@ -174,4 +175,94 @@ void KINNG_REQUEST_SERVER::listenThread()
     wxLogTrace( TraceNng, wxS( "KINNG_REQUEST_SERVER shutting down" ) );
 
     nng_close( socket );
+}
+
+
+struct KINNG_PUBLISHER::SOCKET
+{
+    nng_socket socket = NNG_SOCKET_INITIALIZER;
+};
+
+
+KINNG_PUBLISHER::KINNG_PUBLISHER( const std::string& aSocketUrl ) :
+        m_socketUrl( aSocketUrl ),
+        m_socket( std::make_unique<SOCKET>() )
+{
+}
+
+
+KINNG_PUBLISHER::~KINNG_PUBLISHER()
+{
+    Stop();
+}
+
+
+bool KINNG_PUBLISHER::Running() const
+{
+    return nng_socket_id( m_socket->socket ) >= 0;
+}
+
+
+bool KINNG_PUBLISHER::Start()
+{
+    std::lock_guard<std::mutex> lock( m_mutex );
+
+    if( Running() )
+        return true;
+
+    int retCode = nng_pub0_open( &m_socket->socket );
+
+    if( retCode != 0 )
+    {
+        wxLogTrace( TraceNng, wxString::Format( wxS( "Got error code %d from nng_pub0_open!" ), retCode ) );
+        m_socket->socket = NNG_SOCKET_INITIALIZER;
+        return false;
+    }
+
+    retCode = nng_listen( m_socket->socket, m_socketUrl.c_str(), nullptr, 0 );
+
+    if( retCode != 0 )
+    {
+        wxLogTrace( TraceNng, wxString::Format( wxS( "Got error code %d from nng_listen (%s)!" ), retCode,
+                                                m_socketUrl ) );
+        nng_close( m_socket->socket );
+        m_socket->socket = NNG_SOCKET_INITIALIZER;
+        return false;
+    }
+
+    wxLogTrace( TraceNng, wxString::Format( wxS( "KINNG_PUBLISHER listening at %s" ), m_socketUrl ) );
+    return true;
+}
+
+
+void KINNG_PUBLISHER::Stop()
+{
+    std::lock_guard<std::mutex> lock( m_mutex );
+
+    if( !Running() )
+        return;
+
+    wxLogTrace( TraceNng, wxS( "KINNG_PUBLISHER shutting down" ) );
+    nng_close( m_socket->socket );
+    m_socket->socket = NNG_SOCKET_INITIALIZER;
+}
+
+
+bool KINNG_PUBLISHER::Publish( const std::string& aMessage )
+{
+    std::lock_guard<std::mutex> lock( m_mutex );
+
+    if( !Running() )
+        return false;
+
+    // nng copies the buffer; pub0 never blocks (undeliverable messages are dropped)
+    int retCode = nng_send( m_socket->socket, const_cast<char*>( aMessage.data() ), aMessage.size(), 0 );
+
+    if( retCode != 0 )
+    {
+        wxLogTrace( TraceNng, wxString::Format( wxS( "Got error code %d from nng_send (pub)!" ), retCode ) );
+        return false;
+    }
+
+    return true;
 }

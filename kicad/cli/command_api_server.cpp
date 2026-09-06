@@ -105,6 +105,18 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
         }
     };
 
+    // The project has no API handler of its own, so its open/close events are published here
+    auto publishProjectEvent = [&]( const PROJECT& aProject, bool aOpened )
+    {
+        kiapi::common::events::Event    event;
+        types::DocumentSpecifier* doc = aOpened ? event.mutable_document_opened()->mutable_document()
+                                                : event.mutable_document_closed()->mutable_document();
+        doc->set_type( types::DOCTYPE_PROJECT );
+        doc->mutable_project()->set_name( aProject.GetProjectName().ToUTF8() );
+        doc->mutable_project()->set_path( aProject.GetProjectPath().ToUTF8() );
+        server->Publish( std::move( event ) );
+    };
+
     auto closeAllDocuments =
             [&]( const commands::CloseAllDocuments& aRequest ) -> HANDLER_RESULT<google::protobuf::Empty>
     {
@@ -123,6 +135,7 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
         if( openProjectPath )
         {
             PROJECT& project = Pgm().GetSettingsManager().Prj();
+            publishProjectEvent( project, false );
             Pgm().GetSettingsManager().UnloadProject( &project, false );
         }
 
@@ -241,6 +254,7 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
                 }
 
                 openProjectPath = projectPath;
+                publishProjectEvent( Pgm().GetSettingsManager().Prj(), true );
             }
 
             if( std::ranges::find_if( openDocuments,
@@ -314,6 +328,10 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
         doc.type = requestType;
         doc.fileName = docFile.GetFullName();
         openDocuments.push_back( doc );
+
+        // Opening a board or schematic implicitly opens its project
+        if( !openProjectPath )
+            publishProjectEvent( Pgm().GetSettingsManager().Prj(), true );
 
         openProjectPath = projectPath;
 
@@ -434,6 +452,7 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
         if( openDocuments.empty() && openProjectPath )
         {
             PROJECT& project = Pgm().GetSettingsManager().Prj();
+            publishProjectEvent( project, false );
             Pgm().GetSettingsManager().UnloadProject( &project, false );
             openProjectPath.reset();
         }
@@ -485,7 +504,11 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
     server->SetReadyToReply( true );
 
     wxString listenPath = wxString::FromUTF8( server->SocketPath() );
+    wxString eventsPath = wxString::FromUTF8( server->EventsSocketPath() );
     wxFprintf( stdout, "KiCad API server listening at %s\n", listenPath );
+
+    if( !eventsPath.IsEmpty() )
+        wxFprintf( stdout, "KiCad API events published at %s\n", eventsPath );
 
     auto oldSigInt = std::signal( SIGINT, apiServerSignalHandler );
 #ifdef SIGTERM

@@ -37,7 +37,11 @@
 
 #include <kicommon.h>
 #include <api/common/envelope.pb.h>
+#include <api/common/events.pb.h>
+#include <api/common/types/base_types.pb.h>
 #include <core/typeinfo.h>
+
+class KICAD_API_SERVER;
 
 using kiapi::common::ApiRequest, kiapi::common::ApiResponse;
 using kiapi::common::ApiResponseStatus, kiapi::common::ApiStatusCode;
@@ -59,7 +63,7 @@ struct HANDLER_CONTEXT
 class KICOMMON_API API_HANDLER
 {
 public:
-    API_HANDLER() {}
+    API_HANDLER() : m_server( nullptr ) {}
 
     virtual ~API_HANDLER() {}
 
@@ -96,7 +100,30 @@ public:
      */
     std::vector<SUPPORTED_COMMAND> SupportedCommands() const;
 
+    /**
+     * @return the document this handler serves, if it serves exactly one (editor handlers).  The
+     *         API server publishes DocumentOpened / DocumentClosed events for it when the handler
+     *         is registered and deregistered.
+     */
+    virtual std::optional<kiapi::common::types::DocumentSpecifier> Document() const
+    {
+        return std::nullopt;
+    }
+
+    /// @return the server this handler is registered with, or nullptr
+    KICAD_API_SERVER* Server() const { return m_server; }
+
 protected:
+    friend class KICAD_API_SERVER;
+
+    /// Called by the server on RegisterHandler / DeregisterHandler
+    void attachServer( KICAD_API_SERVER* aServer ) { m_server = aServer; }
+
+    /**
+     * Publish an event on the server's events socket.  Does nothing if the handler is not
+     * registered with a server or the server is not publishing.
+     */
+    void publish( const kiapi::common::events::Event& aEvent );
 
     /**
      * A handler for outer messages (envelopes) that will unpack to inner messages and call a
@@ -178,6 +205,9 @@ protected:
     std::vector<std::string> m_registrationOrder;
 
     static const wxString m_defaultCommitMessage;
+
+    /// The server this handler is registered with (non-owning); see attachServer
+    KICAD_API_SERVER* m_server;
 
 private:
 

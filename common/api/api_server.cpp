@@ -46,6 +46,7 @@
 using kiapi::common::ApiRequest, kiapi::common::ApiResponse, kiapi::common::ApiStatusCode;
 using kiapi::common::commands::GetSupportedCommands, kiapi::common::commands::GetSupportedCommandsResponse;
 using kiapi::common::commands::SupportedCommand;
+using kiapi::common::commands::GetServerInfo, kiapi::common::commands::GetServerInfoResponse;
 
 
 /**
@@ -61,6 +62,7 @@ public:
     {
         registerHandler<GetSupportedCommands, GetSupportedCommandsResponse>(
                 &API_HANDLER_SERVER::handleGetSupportedCommands );
+        registerHandler<GetServerInfo, GetServerInfoResponse>( &API_HANDLER_SERVER::handleGetServerInfo );
     }
 
 private:
@@ -68,6 +70,11 @@ private:
             const HANDLER_CONTEXT<GetSupportedCommands>& aCtx )
     {
         return m_server->SupportedCommands();
+    }
+
+    HANDLER_RESULT<GetServerInfoResponse> handleGetServerInfo( const HANDLER_CONTEXT<GetServerInfo>& aCtx )
+    {
+        return m_server->ServerInfo();
     }
 
     KICAD_API_SERVER* m_server;
@@ -83,11 +90,13 @@ wxDEFINE_EVENT( API_REQUEST_EVENT, wxCommandEvent );
 KICAD_API_SERVER::KICAD_API_SERVER( bool aAutoStart ) :
         wxEvtHandler(),
         m_serverHandler( std::make_unique<API_HANDLER_SERVER>( this ) ),
+        m_eventSequence( 0 ),
         m_token( KIID().AsStdString() ),
         m_readyToReply( false ),
         m_requestPending( false )
 {
     m_handlers.insert( m_serverHandler.get() );
+    m_serverHandler->attachServer( this );
 
     if( !aAutoStart )
         return;
@@ -128,6 +137,14 @@ wxFileName KICAD_API_SERVER::StandardSocketPath()
 std::string KICAD_API_SERVER::StandardSocketUrl()
 {
     return fmt::format( "ipc://{}", StandardSocketPath().GetFullPath().ToUTF8().data() );
+}
+
+
+wxFileName KICAD_API_SERVER::EventsSocketPathFor( const wxFileName& aSocketPath )
+{
+    wxFileName events( aSocketPath );
+    events.SetName( aSocketPath.GetName() + wxS( "-events" ) );
+    return events;
 }
 
 
@@ -200,6 +217,22 @@ void KICAD_API_SERVER::Start()
         return;
     }
 
+    // The events socket sits next to the request socket.  Failing to open it is not fatal:
+    // clients see an empty events_socket_url in GetServerInfo and fall back to polling.
+    wxFileName eventsSocket = EventsSocketPathFor( socket );
+
+    if( eventsSocket.Exists() )
+        wxRemoveFile( eventsSocket.GetFullPath() );
+
+    m_publisher = std::make_unique<KINNG_PUBLISHER>(
+            fmt::format( "ipc://{}", eventsSocket.GetFullPath().ToStdString() ) );
+
+    if( !m_publisher->Start() )
+    {
+        wxLogTrace( traceApi, "Server: failed to start events publisher" );
+        m_publisher.reset( nullptr );
+    }
+
     m_logFilePath.AssignDir( PATHS::GetLogsPath() );
     m_logFilePath.SetName( s_logFileName );
 
@@ -222,6 +255,16 @@ void KICAD_API_SERVER::Stop()
     wxLogTrace( traceApi, "Stopping server" );
     Unbind( API_REQUEST_EVENT, &KICAD_API_SERVER::handleApiEvent, this );
 
+    if( m_publisher )
+    {
+        kiapi::common::events::Event shutdown;
+        shutdown.mutable_server_shutdown();
+        Publish( std::move( shutdown ) );
+
+        m_publisher->Stop();
+        m_publisher.reset( nullptr );
+    }
+
     m_server->Stop();
     m_server.reset( nullptr );
 
@@ -239,7 +282,18 @@ bool KICAD_API_SERVER::Running() const
 void KICAD_API_SERVER::RegisterHandler( API_HANDLER* aHandler )
 {
     wxCHECK( aHandler, /* void */ );
-    m_handlers.insert( aHandler );
+
+    if( !m_handlers.insert( aHandler ).second )
+        return;
+
+    aHandler->attachServer( this );
+
+    if( std::optional<kiapi::common::types::DocumentSpecifier> doc = aHandler->Document() )
+    {
+        kiapi::common::events::Event event;
+        *event.mutable_document_opened()->mutable_document() = std::move( *doc );
+        Publish( std::move( event ) );
+    }
 }
 
 
@@ -248,7 +302,41 @@ void KICAD_API_SERVER::DeregisterHandler( API_HANDLER* aHandler )
     if( aHandler == m_serverHandler.get() )
         return;
 
-    m_handlers.erase( aHandler );
+    if( m_handlers.erase( aHandler ) == 0 )
+        return;
+
+    if( std::optional<kiapi::common::types::DocumentSpecifier> doc = aHandler->Document() )
+    {
+        kiapi::common::events::Event event;
+        *event.mutable_document_closed()->mutable_document() = std::move( *doc );
+        Publish( std::move( event ) );
+    }
+
+    aHandler->attachServer( nullptr );
+}
+
+
+GetServerInfoResponse KICAD_API_SERVER::ServerInfo() const
+{
+    GetServerInfoResponse response;
+    response.set_socket_url( SocketPath() );
+    response.set_events_socket_url( EventsSocketPath() );
+    response.set_kicad_token( m_token );
+    return response;
+}
+
+
+bool KICAD_API_SERVER::Publish( kiapi::common::events::Event aEvent )
+{
+    if( !m_publisher )
+        return false;
+
+    aEvent.set_sequence( m_eventSequence.fetch_add( 1, std::memory_order_acq_rel ) + 1 );
+
+    if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
+        log( "Event: " + aEvent.ShortDebugString() + "\n" );
+
+    return m_publisher->Publish( aEvent.SerializeAsString() );
 }
 
 
@@ -290,6 +378,12 @@ GetSupportedCommandsResponse KICAD_API_SERVER::SupportedCommands() const
 std::string KICAD_API_SERVER::SocketPath() const
 {
     return m_server ? m_server->SocketPath() : "";
+}
+
+
+std::string KICAD_API_SERVER::EventsSocketPath() const
+{
+    return m_publisher ? m_publisher->SocketPath() : "";
 }
 
 

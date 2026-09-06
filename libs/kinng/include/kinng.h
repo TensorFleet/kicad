@@ -24,7 +24,9 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 
 
@@ -63,6 +65,48 @@ private:
     std::string m_pendingReply;
 
     std::condition_variable m_replyReady;
+
+    std::mutex m_mutex;
+};
+
+
+/**
+ * A publish/subscribe (nng pub0) socket that pushes messages to any number of subscribers.
+ *
+ * Publishing is fire-and-forget: nng drops messages for subscribers that are not connected or
+ * cannot keep up, so Publish() never blocks.  It may be called from any thread.
+ */
+class KINNG_PUBLISHER
+{
+public:
+    KINNG_PUBLISHER( const std::string& aSocketUrl );
+
+    ~KINNG_PUBLISHER();
+
+    /**
+     * Open the socket and start listening.
+     * @return true if the listener was started (or was already running)
+     */
+    bool Start();
+
+    void Stop();
+
+    bool Running() const;
+
+    /**
+     * Send aMessage to every connected subscriber.
+     * @return true if the message was handed to nng
+     */
+    bool Publish( const std::string& aMessage );
+
+    const std::string& SocketPath() const { return m_socketUrl; }
+
+private:
+    std::string m_socketUrl;
+
+    /// nng_socket is a struct with a single id; kept behind a pointer so nng headers stay private
+    struct SOCKET;
+    std::unique_ptr<SOCKET> m_socket;
 
     std::mutex m_mutex;
 };

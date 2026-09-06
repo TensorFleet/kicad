@@ -31,6 +31,7 @@
 #include <thread_pool.h>
 #include <gestfich.h>
 #include <local_history.h>
+#include <api/api_handler_pcb.h>
 #include <pcb_edit_frame.h>
 #include <board_design_settings.h>
 #include <board_loader.h>
@@ -969,6 +970,9 @@ bool PCB_EDIT_FRAME::OpenProjectFiles( const std::vector<wxString>& aFileSet, in
 
     if( KISTATUSBAR* statusBar = dynamic_cast<KISTATUSBAR*>( GetStatusBar() ) )
         statusBar->AddWarningMessages( "load", loadReporter.GetMessages() );
+
+    if( m_apiHandler )
+        m_apiHandler->NotifyDocumentOpened();
 
     return true;
 }

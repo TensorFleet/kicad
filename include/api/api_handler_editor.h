@@ -47,6 +47,12 @@ class API_HANDLER_EDITOR : public API_HANDLER
 public:
     API_HANDLER_EDITOR( EDA_BASE_FRAME* aFrame = nullptr );
 
+    /**
+     * Publish a DocumentOpened event for the current document.  Editor frames call this after
+     * loading a file into a frame whose handler was registered before the file existed.
+     */
+    void NotifyDocumentOpened();
+
 protected:
     /// If the header is valid, returns the item container
     HANDLER_RESULT<std::optional<KIID>> validateItemHeaderDocument(
@@ -101,11 +107,19 @@ protected:
             const HANDLER_CONTEXT<commands::GetDocumentRevision>& aCtx );
 
     /**
-     * Record that the document was changed (or saved/reverted) so that GetDocumentRevision
-     * reports a new value.  Called by pushCurrentCommit and onModified; handlers that change
-     * the document without going through either must call it themselves.
+     * Record that the document was changed (or reverted) so that GetDocumentRevision reports a
+     * new value, and publish a DocumentChanged event without item details.  Called by
+     * pushCurrentCommit and onModified; handlers that change the document without going through
+     * either must call it themselves.
      */
-    void bumpRevision() { ++m_revision; }
+    void bumpRevision();
+
+    /**
+     * Record that the document was written to disk: advances the revision and publishes a
+     * DocumentSaved event.
+     * @param aPath is the absolute path (or library id) the document was written to
+     */
+    void notifyDocumentSaved( const wxString& aPath );
 
     HANDLER_RESULT<google::protobuf::Empty> handleRefreshEditor(
             const HANDLER_CONTEXT<commands::RefreshEditor>& aCtx );
@@ -124,6 +138,20 @@ protected:
 
     /// @return the editor frame type that serves thisDocumentType()
     types::FrameType thisFrameType() const;
+
+    /**
+     * Advance the revision and publish a DocumentChanged event.
+     * @param aClientName is the API client that made the change, if any
+     * @param aMessage is the commit message, if any
+     * @param aCommitId is the id of the API commit, if the change came from one
+     * @param aCommit is the commit about to be pushed; its staged entries are reported as
+     *                created/updated/deleted ids
+     */
+    void publishDocumentChanged( const std::string& aClientName, const wxString& aMessage,
+                                 const KIID* aCommitId = nullptr, const COMMIT* aCommit = nullptr );
+
+    void fillDocumentChanged( events::DocumentChanged& aEvent, const std::string& aClientName,
+                              const wxString& aMessage, const KIID* aCommitId, const COMMIT* aCommit ) const;
 
     /**
      * Override this to create an appropriate COMMIT subclass for the frame in question
