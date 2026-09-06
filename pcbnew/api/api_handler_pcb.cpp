@@ -229,6 +229,8 @@ API_HANDLER_PCB::API_HANDLER_PCB( std::shared_ptr<PCB_CONTEXT> aContext, PCB_EDI
     registerHandler<RemoveTeardrops, SetTeardropsResponse>( &API_HANDLER_PCB::handleRemoveTeardrops );
     registerHandler<AutoplaceFootprints, AutoplaceFootprintsResponse>( &API_HANDLER_PCB::handleAutoplaceFootprints );
     registerHandler<GlobalDeletion, GlobalDeletionResponse>( &API_HANDLER_PCB::handleGlobalDeletion );
+    registerHandler<GetGraphicsDefaults, GraphicsDefaultsResponse>( &API_HANDLER_PCB::handleGetGraphicsDefaults );
+    registerHandler<SetGraphicsDefaults, GraphicsDefaultsResponse>( &API_HANDLER_PCB::handleSetGraphicsDefaults );
 
     registerHandler<HighlightNets, HighlightNetsResponse>(
             &API_HANDLER_PCB::handleHighlightNets, HANDLER_MODE::GUI_ONLY );
@@ -4515,5 +4517,112 @@ HANDLER_RESULT<GlobalDeletionResponse> API_HANDLER_PCB::handleGlobalDeletion( co
     if( frame() )
         frame()->Refresh();
 
+    return response;
+}
+
+
+//// Graphics defaults (Since 11.0) ////
+
+namespace
+{
+
+int layerClassIndex( board::BoardLayerClass aClass )
+{
+    switch( aClass )
+    {
+    case board::BLC_SILKSCREEN:  return LAYER_CLASS_SILK;
+    case board::BLC_COPPER:      return LAYER_CLASS_COPPER;
+    case board::BLC_EDGES:       return LAYER_CLASS_EDGES;
+    case board::BLC_COURTYARD:   return LAYER_CLASS_COURTYARD;
+    case board::BLC_FABRICATION: return LAYER_CLASS_FAB;
+    case board::BLC_OTHER:       return LAYER_CLASS_OTHERS;
+    default:                     return -1;
+    }
+}
+
+} // namespace
+
+
+void API_HANDLER_PCB::packGraphicsDefaults( board::GraphicsDefaults& aOut ) const
+{
+    const BOARD_DESIGN_SETTINGS& bds = board()->GetDesignSettings();
+
+    for( board::BoardLayerClass layerClass : { board::BLC_SILKSCREEN, board::BLC_COPPER, board::BLC_EDGES,
+                                               board::BLC_COURTYARD, board::BLC_FABRICATION, board::BLC_OTHER } )
+    {
+        int                                index = layerClassIndex( layerClass );
+        board::BoardLayerGraphicsDefaults* out = aOut.add_layers();
+
+        out->set_layer( layerClass );
+        out->mutable_line_thickness()->set_value_nm( bds.m_LineThickness[index] );
+
+        types::TextAttributes* text = out->mutable_text();
+        PackVector2( *text->mutable_size(), bds.m_TextSize[index] );
+        text->mutable_stroke_width()->set_value_nm( bds.m_TextThickness[index] );
+        text->set_italic( bds.m_TextItalic[index] );
+        text->set_keep_upright( bds.m_TextUpright[index] );
+        text->set_visible( true );
+    }
+}
+
+
+HANDLER_RESULT<GraphicsDefaultsResponse>
+API_HANDLER_PCB::handleGetGraphicsDefaults( const HANDLER_CONTEXT<GetGraphicsDefaults>& aCtx )
+{
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    GraphicsDefaultsResponse response;
+    packGraphicsDefaults( *response.mutable_defaults() );
+    return response;
+}
+
+
+HANDLER_RESULT<GraphicsDefaultsResponse>
+API_HANDLER_PCB::handleSetGraphicsDefaults( const HANDLER_CONTEXT<SetGraphicsDefaults>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    ApiResponseStatus e;
+    e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+
+    for( const board::BoardLayerGraphicsDefaults& in : aCtx.Request.defaults().layers() )
+    {
+        if( layerClassIndex( in.layer() ) < 0 )
+        {
+            e.set_error_message( "every entry needs a known layer class" );
+            return tl::unexpected( e );
+        }
+
+        if( in.line_thickness().value_nm() < 0 || in.text().stroke_width().value_nm() < 0
+            || in.text().size().x_nm() <= 0 || in.text().size().y_nm() <= 0 )
+        {
+            e.set_error_message( "text sizes must be positive and thicknesses non-negative" );
+            return tl::unexpected( e );
+        }
+    }
+
+    BOARD_DESIGN_SETTINGS& bds = board()->GetDesignSettings();
+
+    for( const board::BoardLayerGraphicsDefaults& in : aCtx.Request.defaults().layers() )
+    {
+        int index = layerClassIndex( in.layer() );
+
+        bds.m_LineThickness[index] = static_cast<int>( in.line_thickness().value_nm() );
+        bds.m_TextSize[index] = UnpackVector2( in.text().size() );
+        bds.m_TextThickness[index] = static_cast<int>( in.text().stroke_width().value_nm() );
+        bds.m_TextItalic[index] = in.text().italic();
+        bds.m_TextUpright[index] = in.text().keep_upright();
+    }
+
+    if( aCtx.Request.defaults().layers_size() > 0 )
+        bumpRevision();
+
+    GraphicsDefaultsResponse response;
+    packGraphicsDefaults( *response.mutable_defaults() );
     return response;
 }

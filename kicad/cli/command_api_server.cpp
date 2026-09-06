@@ -906,6 +906,42 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
     commonHandler.SetNewDocumentHandler( newDocument );
     commonHandler.SetGetProjectInfoHandler( getProjectInfo );
 
+    // GetAppSettings reads an editor's settings file, which its kiface registers when it loads
+    commonHandler.SetEnsureAppSettingsHandler(
+            [&]( commands::AppType aApp, wxString* aError ) -> bool
+            {
+                KIWAY::FACE_T face = KIWAY::KIWAY_FACE_COUNT;
+
+                switch( aApp )
+                {
+                case commands::APP_PCB_EDITOR:
+                case commands::APP_FOOTPRINT_EDITOR: face = KIWAY::FACE_PCB; break;
+                case commands::APP_SCHEMATIC_EDITOR:
+                case commands::APP_SYMBOL_EDITOR:    face = KIWAY::FACE_SCH; break;
+                default:                                                     break;
+                }
+
+                if( face == KIWAY::KIWAY_FACE_COUNT )
+                {
+                    if( aError )
+                        *aError = wxS( "unknown editor" );
+
+                    return false;
+                }
+
+                try
+                {
+                    return aKiway.KiFACE( face ) != nullptr;
+                }
+                catch( const IO_ERROR& ioe )
+                {
+                    if( aError )
+                        *aError = ioe.What();
+
+                    return false;
+                }
+            } );
+
     server->RegisterHandler( &commonHandler );
     server->Start();
 

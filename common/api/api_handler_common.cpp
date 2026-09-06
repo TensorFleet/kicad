@@ -35,6 +35,8 @@
 #include <api/api_utils.h>
 #include <project/net_settings.h>
 #include <project/project_file.h>
+#include <settings/app_settings.h>
+#include <settings/color_settings.h>
 #include <settings/settings_manager.h>
 #include <wx/string.h>
 
@@ -53,6 +55,11 @@ API_HANDLER_COMMON::API_HANDLER_COMMON() :
     registerHandler<GetNetClasses, NetClassesResponse>( &API_HANDLER_COMMON::handleGetNetClasses );
     registerHandler<SetNetClasses, Empty>( &API_HANDLER_COMMON::handleSetNetClasses );
     registerHandler<Ping, Empty>( &API_HANDLER_COMMON::handlePing );
+
+    // Since 11.0
+    registerHandler<ListColorThemes, ColorThemesResponse>( &API_HANDLER_COMMON::handleListColorThemes );
+    registerHandler<GetColorTheme, ColorThemeResponse>( &API_HANDLER_COMMON::handleGetColorTheme );
+    registerHandler<commands::GetAppSettings, AppSettings>( &API_HANDLER_COMMON::handleGetAppSettings );
     registerHandler<GetTextExtents, types::Box2>( &API_HANDLER_COMMON::handleGetTextExtents );
     registerHandler<GetTextAsShapes, GetTextAsShapesResponse>(
             &API_HANDLER_COMMON::handleGetTextAsShapes );
@@ -539,4 +546,193 @@ HANDLER_RESULT<GetPathsResponse> API_HANDLER_COMMON::handleGetPaths( const HANDL
     addPath( types::PATH_STOCK_TEMPLATES, PATHS::GetStockTemplatesPath() );
 
     return reply;
+}
+
+
+//// Settings (Since 11.0) ////
+
+namespace
+{
+
+void packThemeInfo( ColorThemeInfo* aOut, const COLOR_SETTINGS* aTheme )
+{
+    aOut->set_name( aTheme->GetName().ToUTF8() );
+    aOut->set_read_only( aTheme->IsReadOnly() );
+
+    // Built-in themes have no file
+    if( !aTheme->IsReadOnly() || !aTheme->GetFilename().StartsWith( wxS( "_" ) ) )
+        aOut->set_filename( aTheme->GetFilename().ToUTF8() );
+}
+
+} // namespace
+
+
+HANDLER_RESULT<ColorThemesResponse>
+API_HANDLER_COMMON::handleListColorThemes( const HANDLER_CONTEXT<ListColorThemes>& aCtx )
+{
+    ColorThemesResponse response;
+
+    for( const COLOR_SETTINGS* theme : Pgm().GetSettingsManager().GetColorSettingsList() )
+        packThemeInfo( response.add_themes(), theme );
+
+    return response;
+}
+
+
+HANDLER_RESULT<ColorThemeResponse> API_HANDLER_COMMON::handleGetColorTheme( const HANDLER_CONTEXT<GetColorTheme>& aCtx )
+{
+    SETTINGS_MANAGER& manager = Pgm().GetSettingsManager();
+    wxString          name = wxString::FromUTF8( aCtx.Request.name() );
+    COLOR_SETTINGS*   theme = nullptr;
+
+    if( name.IsEmpty() )
+        name = COLOR_SETTINGS::COLOR_BUILTIN_DEFAULT;
+
+    // GetColorSettings invents a theme for an unknown name; only answer for known ones
+    for( COLOR_SETTINGS* candidate : manager.GetColorSettingsList() )
+    {
+        if( candidate->GetFilename() == name || candidate->GetName().CmpNoCase( name ) == 0 )
+        {
+            theme = candidate;
+            break;
+        }
+    }
+
+    if( !theme )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( fmt::format( "no color theme named '{}'; see ListColorThemes", aCtx.Request.name() ) );
+        return tl::unexpected( e );
+    }
+
+    ColorThemeResponse response;
+    packThemeInfo( response.mutable_theme(), theme );
+    response.set_override_schematic_item_colors( theme->GetOverrideSchItemColors() );
+
+    for( const auto& [key, layer] : theme->GetColorKeys() )
+    {
+        ColorThemeEntry* entry = response.add_colors();
+        entry->set_key( key );
+        entry->set_layer( layer );
+
+        KIGFX::COLOR4D color = theme->GetColor( layer );
+        entry->mutable_color()->set_r( color.r );
+        entry->mutable_color()->set_g( color.g );
+        entry->mutable_color()->set_b( color.b );
+        entry->mutable_color()->set_a( color.a );
+    }
+
+    return response;
+}
+
+
+wxString API_HANDLER_COMMON::AppSettingsFilename( AppType aApp )
+{
+    switch( aApp )
+    {
+    case APP_PCB_EDITOR:       return wxS( "pcbnew" );
+    case APP_SCHEMATIC_EDITOR: return wxS( "eeschema" );
+    case APP_FOOTPRINT_EDITOR: return wxS( "fpedit" );
+    case APP_SYMBOL_EDITOR:    return wxS( "symbol_editor" );
+    default:                   return wxEmptyString;
+    }
+}
+
+
+HANDLER_RESULT<AppSettings> API_HANDLER_COMMON::handleGetAppSettings( const HANDLER_CONTEXT<commands::GetAppSettings>& aCtx )
+{
+    ApiResponseStatus e;
+    e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+
+    wxString filename = AppSettingsFilename( aCtx.Request.app() );
+
+    if( filename.IsEmpty() )
+    {
+        e.set_error_message( "app must be one of the editors" );
+        return tl::unexpected( e );
+    }
+
+    SETTINGS_MANAGER& manager = Pgm().GetSettingsManager();
+
+    if( !manager.GetSettingsByFilename( filename ) && m_ensureAppSettingsHandler )
+    {
+        wxString error;
+
+        if( !m_ensureAppSettingsHandler( aCtx.Request.app(), &error ) )
+        {
+            e.set_error_message( fmt::format( "the editor's settings are not available: {}", error.ToUTF8().data() ) );
+            return tl::unexpected( e );
+        }
+    }
+
+    JSON_SETTINGS* json = manager.GetSettingsByFilename( filename );
+
+    if( !json )
+    {
+        e.set_status( ApiStatusCode::AS_NOT_READY );
+        e.set_error_message( fmt::format( "the settings of '{}' are not loaded in this KiCad", filename.ToUTF8().data() ) );
+        return tl::unexpected( e );
+    }
+
+    // Every editor's settings file derives from APP_SETTINGS_BASE; a dynamic_cast cannot be
+    // trusted across the kiface boundary, so the file name stands for the type
+    APP_SETTINGS_BASE* app = static_cast<APP_SETTINGS_BASE*>( json );
+    AppSettings        response;
+
+    response.set_app( aCtx.Request.app() );
+    response.set_settings_file( app->GetFullFilename().ToUTF8() );
+    response.set_color_theme( app->m_ColorTheme.ToUTF8() );
+    response.set_max_undo_items( static_cast<uint32_t>( std::max( 0, app->m_System.max_undo_items ) ) );
+
+    switch( static_cast<EDA_UNITS>( app->m_System.units ) )
+    {
+    case EDA_UNITS::INCH: response.set_units( US_INCHES );      break;
+    case EDA_UNITS::MM:   response.set_units( US_MILLIMETRES ); break;
+    case EDA_UNITS::MILS: response.set_units( US_MILS );        break;
+    default:                                                    break;
+    }
+
+    const GRID_SETTINGS& grid = app->m_Window.grid;
+
+    for( const GRID& definition : grid.grids )
+    {
+        GridDefinition* out = response.add_grids();
+        out->set_name( definition.name.ToUTF8() );
+        out->set_x( definition.x.ToUTF8() );
+        out->set_y( definition.y.ToUTF8() );
+    }
+
+    response.set_current_grid( static_cast<uint32_t>( std::max( 0, grid.last_size_idx ) ) );
+    response.set_grid_visible( grid.show );
+    response.set_grid_axes_visible( grid.axes_enabled );
+    response.set_grid_style( static_cast<uint32_t>( std::max( 0, grid.style ) ) );
+    response.set_grid_snap( static_cast<uint32_t>( std::max( 0, grid.snap ) ) );
+
+    for( double factor : app->m_Window.zoom_factors )
+        response.add_zoom_factors( factor );
+
+    // Item defaults live in the settings file's "drawing" section (schematic and symbol editors);
+    // the board editors keep theirs in the document
+    app->Store();
+
+    if( std::optional<nlohmann::json> drawing = app->GetJson( "drawing" ) )
+    {
+        if( drawing->is_object() )
+        {
+            for( auto it = drawing->begin(); it != drawing->end(); ++it )
+            {
+                const nlohmann::json& value = it.value();
+
+                if( value.is_string() )
+                    ( *response.mutable_defaults() )[it.key()] = value.get<std::string>();
+                else if( value.is_boolean() )
+                    ( *response.mutable_defaults() )[it.key()] = value.get<bool>() ? "true" : "false";
+                else if( value.is_number() )
+                    ( *response.mutable_defaults() )[it.key()] = value.dump();
+            }
+        }
+    }
+
+    return response;
 }
