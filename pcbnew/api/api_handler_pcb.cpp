@@ -25,6 +25,7 @@
 #include <common.h>
 #include <fmt.h>
 #include <api/api_handler_pcb.h>
+#include <api/api_job_registry.h>
 #include <api/api_jobs.h>
 #include <api/api_pcb_utils.h>
 #include <api/api_enums.h>
@@ -2337,6 +2338,12 @@ HANDLER_RESULT<DrcResultsResponse> API_HANDLER_PCB::handleRunBoardJobDrc( const 
             return tl::unexpected( e );
         }
     }
+
+    // An asynchronous job runs on the registry's worker thread and shares this document's
+    // PROJECT, its footprint library adapter and the KiCad thread pool with the checker, which
+    // then rebuilds the board's markers underneath it.  Let the queue drain first, the same way
+    // a synchronous job and IFACE::closeCurrentDocument do.
+    API_JOB_REGISTRY::Instance().WaitForIdle();
 
     BOARD*                      brd = board();
     std::shared_ptr<DRC_ENGINE> drcEngine = brd->GetDesignSettings().m_DRCEngine;
