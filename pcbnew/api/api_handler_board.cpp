@@ -1288,15 +1288,33 @@ HANDLER_RESULT<CreateItemsResponse> API_HANDLER_BOARD::handleParseAndCreateItems
 
     // The same parser the Paste action uses: a kicad_pcb container (as written by
     // SaveSelectionToString / SaveItemsToString / SaveDocumentToString) or a single footprint
-    CLIPBOARD_IO io;
-    io.SetBoard( board() );
-    io.SetReader(
-            [&]()
-            {
-                return wxString::FromUTF8( aCtx.Request.contents() );
-            } );
+    wxString contents = wxString::FromUTF8( aCtx.Request.contents() );
 
-    std::unique_ptr<BOARD_ITEM> parsed( io.Parse() );
+    auto parse = [&]( const wxString& aText ) -> std::unique_ptr<BOARD_ITEM>
+    {
+        CLIPBOARD_IO io;
+        io.SetBoard( board() );
+        io.SetReader(
+                [&]()
+                {
+                    return aText;
+                } );
+
+        return std::unique_ptr<BOARD_ITEM>( io.Parse() );
+    };
+
+    std::unique_ptr<BOARD_ITEM> parsed = parse( contents );
+
+    // A container written by hand may omit the version header the parser insists on
+    if( !parsed && contents.Trim( false ).StartsWith( wxS( "(kicad_pcb" ) ) && !contents.Contains( wxS( "(version" ) ) )
+    {
+        wxString withHeader = contents;
+        withHeader.Replace( wxS( "(kicad_pcb" ),
+                            wxString::Format( wxS( "(kicad_pcb (version %d) (generator \"kicad_api\")" ),
+                                              SEXPR_BOARD_FILE_VERSION ),
+                            false );
+        parsed = parse( withHeader );
+    }
 
     if( !parsed )
     {
