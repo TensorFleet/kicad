@@ -149,10 +149,14 @@ HANDLER_RESULT<Empty> API_HANDLER_FOOTPRINT::handleOpenLibraryItem(
         return tl::unexpected( e );
     }
 
-    FOOTPRINT_LIBRARY_ADAPTER* adapter = PROJECT_PCB::FootprintLibAdapter( &frame()->Prj() );
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
 
-    wxString libraryName = aCtx.Request.identifier().library_nickname();
-    wxString fpName = aCtx.Request.identifier().entry_name();
+    // Headless (no frame) the footprint is loaded into this handler's context in place
+    FOOTPRINT_LIBRARY_ADAPTER* adapter = PROJECT_PCB::FootprintLibAdapter( &footprintContext()->Prj() );
+
+    wxString libraryName = wxString::FromUTF8( aCtx.Request.identifier().library_nickname() );
+    wxString fpName = wxString::FromUTF8( aCtx.Request.identifier().entry_name() );
 
     LIB_ID fpid( libraryName, fpName );
     // preload the footprint to make sure it exists and so that we can make a nice error
@@ -178,7 +182,27 @@ HANDLER_RESULT<Empty> API_HANDLER_FOOTPRINT::handleOpenLibraryItem(
         return tl::unexpected( e );
     }
 
-    frame()->LoadFootprintFromLibrary( fpid );
+    std::optional<DocumentSpecifier> previous = Document();
+
+    if( !footprintContext()->OpenFootprint( fpid ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( fmt::format( "could not open footprint {}", fpid.Format().c_str() ) );
+        return tl::unexpected( e );
+    }
+
+    // The document this handler serves changed: tell subscribers, as OpenDocument would
+    if( previous && Server() )
+    {
+        kiapi::common::events::Event closed;
+        *closed.mutable_document_closed()->mutable_document() = std::move( *previous );
+        publish( closed );
+    }
+
+    NotifyDocumentOpened();
+    bumpRevision();
+
     return Empty();
 }
 

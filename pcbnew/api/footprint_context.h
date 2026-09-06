@@ -38,6 +38,12 @@ public:
     virtual bool SaveFootprint( FOOTPRINT* aFootprint ) = 0;
 
     virtual bool SaveFootprintInLibrary( FOOTPRINT* aFootprint, const wxString& aLibraryName ) = 0;
+
+    /**
+     * Replace the open footprint with the library footprint aFPID (OpenLibraryItem).
+     * @return false if the footprint could not be loaded
+     */
+    virtual bool OpenFootprint( const LIB_ID& aFPID ) = 0;
 };
 
 
