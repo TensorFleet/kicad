@@ -194,6 +194,7 @@ BOOST_FIXTURE_TEST_CASE( UndoRedoBoard, API_SERVER_E2E_FIXTURE )
     BOOST_REQUIRE_MESSAGE( Client().GetFirstFootprint( board, &footprint ), Client().LastError() );
 
     const VECTOR2I positionBefore = footprint.GetPosition();
+    const KIID     footprintId = footprint.m_Uuid;
 
     kiapi::board::types::FootprintInstance instance;
     {
@@ -242,7 +243,8 @@ BOOST_FIXTURE_TEST_CASE( UndoRedoBoard, API_SERVER_E2E_FIXTURE )
     BOOST_CHECK( !stack.undo( 1 ).client_name().empty() );
     BOOST_CHECK_GE( stack.undo( 1 ).item_count(), 1 );
 
-    BOOST_REQUIRE_MESSAGE( Client().GetFirstFootprint( board, &footprint ), Client().LastError() );
+    BOOST_REQUIRE_MESSAGE( Client().GetFootprintById( board, footprintId, &footprint ),
+                           Client().LastError() );
     BOOST_CHECK( footprint.GetPosition() != positionBefore );
 
     // Undo both
@@ -254,8 +256,10 @@ BOOST_FIXTURE_TEST_CASE( UndoRedoBoard, API_SERVER_E2E_FIXTURE )
     BOOST_CHECK_EQUAL( response.undo_count(), 0 );
     BOOST_CHECK_EQUAL( response.redo_count(), 2 );
 
-    BOOST_REQUIRE_MESSAGE( Client().GetFirstFootprint( board, &footprint ), Client().LastError() );
-    BOOST_CHECK( footprint.GetPosition() == positionBefore );
+    BOOST_REQUIRE_MESSAGE( Client().GetFootprintById( board, footprintId, &footprint ),
+                           Client().LastError() );
+    BOOST_CHECK_EQUAL( footprint.GetPosition().x, positionBefore.x );
+    BOOST_CHECK_EQUAL( footprint.GetPosition().y, positionBefore.y );
 
     kiapi::common::types::Vector2 originAfter;
     BOOST_REQUIRE_MESSAGE( Send( Client(), getOrigin, &originAfter, &error ), error );
@@ -270,8 +274,10 @@ BOOST_FIXTURE_TEST_CASE( UndoRedoBoard, API_SERVER_E2E_FIXTURE )
     BOOST_CHECK_EQUAL( response.applied(), 2 );
     BOOST_CHECK_EQUAL( response.redo_count(), 0 );
 
-    BOOST_REQUIRE_MESSAGE( Client().GetFirstFootprint( board, &footprint ), Client().LastError() );
-    BOOST_CHECK( footprint.GetPosition() == VECTOR2I( positionBefore.x + 5000000, positionBefore.y + 7000000 ) );
+    BOOST_REQUIRE_MESSAGE( Client().GetFootprintById( board, footprintId, &footprint ),
+                           Client().LastError() );
+    BOOST_CHECK_EQUAL( footprint.GetPosition().x, positionBefore.x + 5000000 );
+    BOOST_CHECK_EQUAL( footprint.GetPosition().y, positionBefore.y + 7000000 );
 
     BOOST_REQUIRE_MESSAGE( Send( Client(), getOrigin, &originAfter, &error ), error );
     BOOST_CHECK_EQUAL( originAfter.x_nm(), originBefore.x_nm() + 12000000 );
@@ -327,8 +333,11 @@ BOOST_FIXTURE_TEST_CASE( UndoRedoSchematic, API_SERVER_E2E_FIXTURE )
 
     wxString error;
 
-    auto firstSymbol =
-            [&]( kiapi::schematic::types::SchematicSymbolInstance* aOut ) -> bool
+    // Undo re-adds the item it restores, so the order GetItems reports is not stable across it;
+    // pass an id to follow one symbol through the sequence, or none for whichever comes first
+    auto getSymbol =
+            [&]( kiapi::schematic::types::SchematicSymbolInstance* aOut,
+                 const std::string& aId = std::string() ) -> bool
             {
                 GetItems request;
                 *request.mutable_header()->mutable_document() = schematic;
@@ -339,11 +348,26 @@ BOOST_FIXTURE_TEST_CASE( UndoRedoSchematic, API_SERVER_E2E_FIXTURE )
                 if( !Send( Client(), request, &response, &error ) || response.items_size() == 0 )
                     return false;
 
-                return response.items( 0 ).UnpackTo( aOut );
+                if( aId.empty() )
+                    return response.items( 0 ).UnpackTo( aOut );
+
+                for( const google::protobuf::Any& item : response.items() )
+                {
+                    kiapi::schematic::types::SchematicSymbolInstance candidate;
+
+                    if( item.UnpackTo( &candidate ) && candidate.id().value() == aId )
+                    {
+                        *aOut = candidate;
+                        return true;
+                    }
+                }
+
+                error = wxString::Format( wxS( "no symbol with id %s" ), aId );
+                return false;
             };
 
     kiapi::schematic::types::SchematicSymbolInstance symbol;
-    BOOST_REQUIRE_MESSAGE( firstSymbol( &symbol ), error );
+    BOOST_REQUIRE_MESSAGE( getSymbol( &symbol ), error );
 
     const std::string id = symbol.id().value();
     const int64_t     xBefore = symbol.position().x_nm();
@@ -371,7 +395,7 @@ BOOST_FIXTURE_TEST_CASE( UndoRedoSchematic, API_SERVER_E2E_FIXTURE )
     BOOST_REQUIRE_MESSAGE( Send( Client(), undo, &response, &error ), error );
     BOOST_CHECK_EQUAL( response.applied(), 1 );
 
-    BOOST_REQUIRE_MESSAGE( firstSymbol( &symbol ), error );
+    BOOST_REQUIRE_MESSAGE( getSymbol( &symbol, id ), error );
     BOOST_CHECK_EQUAL( symbol.position().x_nm(), xBefore );
 
     // Delete and bring back
