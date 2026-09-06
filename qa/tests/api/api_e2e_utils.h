@@ -47,6 +47,7 @@
 #include <api/common/types/base_types.pb.h>
 #include <api/common/types/enums.pb.h>
 #include <api/common/types/jobs.pb.h>
+#include <api/board/board_types.pb.h>
 #include <footprint.h>
 #include <pcbnew_utils/board_file_utils.h>
 #include <qa_utils/wx_utils/unit_test_utils.h>
@@ -279,6 +280,54 @@ public:
         }
 
         return true;
+    }
+
+    /**
+     * Read back one footprint by its id.  Undo and redo re-add the items they restore, so the
+     * order GetItems reports is not stable across them and GetFirstFootprint cannot be used to
+     * follow one footprint through a sequence of edits.
+     */
+    bool GetFootprintById( const kiapi::common::types::DocumentSpecifier& aDocument, const KIID& aId,
+                           FOOTPRINT* aFootprint )
+    {
+        wxCHECK( aFootprint, false );
+
+        kiapi::common::commands::GetItems request;
+        *request.mutable_header()->mutable_document() = aDocument;
+        request.add_types( kiapi::common::types::KOT_PCB_FOOTPRINT );
+
+        kiapi::common::ApiResponse response;
+
+        if( !send( request, response ) )
+        {
+            m_lastError = wxS( "Failed to send command" );
+            return false;
+        }
+
+        if( response.status().status() != kiapi::common::AS_OK )
+        {
+            m_lastError = response.status().error_message();
+            return false;
+        }
+
+        kiapi::common::commands::GetItemsResponse itemsResponse;
+
+        if( !response.message().UnpackTo( &itemsResponse ) )
+        {
+            m_lastError = wxS( "Failed to unpack GetItemsResponse" );
+            return false;
+        }
+
+        for( const google::protobuf::Any& item : itemsResponse.items() )
+        {
+            kiapi::board::types::FootprintInstance instance;
+
+            if( item.UnpackTo( &instance ) && instance.id().value() == aId.AsStdString() )
+                return aFootprint->Deserialize( item );
+        }
+
+        m_lastError = wxString::Format( wxS( "no footprint with id %s" ), aId.AsString() );
+        return false;
     }
 
     bool CloseDocument( const kiapi::common::types::DocumentSpecifier* aDocument,
