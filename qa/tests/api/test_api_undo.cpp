@@ -208,6 +208,11 @@ BOOST_FIXTURE_TEST_CASE( UndoRedoBoard, API_SERVER_E2E_FIXTURE )
     BeginCommitResponse begun;
     BOOST_REQUIRE_MESSAGE( Send( Client(), BeginCommit(), &begun, &error ), error );
 
+    // An open commit refuses undo even before anything is staged in it
+    Undo emptyCommitUndo;
+    *emptyCommitUndo.mutable_document() = board;
+    BOOST_CHECK_EQUAL( SendStatus( Client(), emptyCommitUndo ), kiapi::common::AS_BUSY );
+
     UpdateItems update;
     *update.mutable_header()->mutable_document() = board;
     update.add_items()->PackFrom( instance );
