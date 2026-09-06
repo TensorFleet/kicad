@@ -81,9 +81,67 @@ public:
 
         m_projectPath = dstPro.GetFullPath();
         m_schematicPath = dstSch.GetFullPath();
-        return true;
+
+        return createFootprintLibraries();
     }
 
+private:
+    /**
+     * Write the footprint libraries the kitchen sink schematic names, so that a sync to a board
+     * can actually place them.  A stub footprint per entry is enough: the sync only has to load
+     * it.  Generating them here keeps the fixture beside the test that needs it.
+     */
+    bool createFootprintLibraries()
+    {
+        static const std::pair<wxString, wxString> entries[] = {
+            { wxS( "Connector_Audio" ), wxS( "Jack_3.5mm_CUI_SJ-3524-SMT_Horizontal" ) },
+            { wxS( "Package_SO" ), wxS( "SOIC-8_3.9x4.9mm_P1.27mm" ) }
+        };
+
+        wxString table = wxS( "(fp_lib_table\n  (version 7)\n" );
+
+        for( const auto& [nickname, footprint] : entries )
+        {
+            wxFileName dir( m_dir, wxEmptyString );
+            dir.AppendDir( nickname + wxS( ".pretty" ) );
+
+            if( !wxFileName::Mkdir( dir.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL ) )
+                return false;
+
+            wxFileName modFile( dir.GetPath(), footprint + wxS( ".kicad_mod" ) );
+            wxFFile    mod( modFile.GetFullPath(), wxS( "w" ) );
+
+            if( !mod.IsOpened() )
+                return false;
+
+            wxString body;
+            body << wxS( "(footprint \"" ) << footprint << wxS( "\"\n" )
+                 << wxS( "\t(version 20240108)\n" )
+                 << wxS( "\t(generator \"qa\")\n" )
+                 << wxS( "\t(generator_version \"9.0\")\n" )
+                 << wxS( "\t(layer \"F.Cu\")\n" )
+                 << wxS( "\t(attr smd)\n" )
+                 << wxS( "\t(pad \"1\" smd rect (at 0 0) (size 1 1) (layers \"F.Cu\" \"F.Paste\" \"F.Mask\"))\n" )
+                 << wxS( "\t(pad \"2\" smd rect (at 2 0) (size 1 1) (layers \"F.Cu\" \"F.Paste\" \"F.Mask\"))\n" )
+                 << wxS( ")\n" );
+
+            if( !mod.Write( body ) )
+                return false;
+
+            mod.Close();
+
+            table << wxS( "  (lib (name \"" ) << nickname << wxS( "\") (type \"KiCad\") (uri \"${KIPRJMOD}/" )
+                  << nickname << wxS( ".pretty\") (options \"\") (descr \"\"))\n" );
+        }
+
+        table << wxS( ")\n" );
+
+        wxFFile out( wxFileName( m_dir, wxS( "fp-lib-table" ) ).GetFullPath(), wxS( "w" ) );
+
+        return out.IsOpened() && out.Write( table );
+    }
+
+public:
     const wxString& Dir() const { return m_dir; }
     const wxString& ProjectPath() const { return m_projectPath; }
     const wxString& SchematicPath() const { return m_schematicPath; }
@@ -313,11 +371,23 @@ BOOST_FIXTURE_TEST_CASE( SchematicOpsAnnotateAndFields, API_SERVER_E2E_FIXTURE )
 
     // Footprint assignment by reference
     {
+        // The selection-scope pass above re-annotated this symbol, so the reference captured
+        // with the row is stale; assignment matches on the current one
+        std::string firstReference;
+
+        for( const SymbolFieldsRow& row : table.rows() )
+        {
+            if( row.id().value() == first.id().value() )
+                firstReference = row.reference();
+        }
+
+        BOOST_REQUIRE( !firstReference.empty() );
+
         AssignFootprints request;
         *request.mutable_schematic() = doc;
 
         FootprintAssignment* good = request.add_assignments();
-        good->set_reference( first.reference() );
+        good->set_reference( firstReference );
         good->mutable_footprint()->set_library_nickname( "Resistor_SMD" );
         good->mutable_footprint()->set_entry_name( "R_0603_1608Metric" );
 
