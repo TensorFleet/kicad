@@ -123,3 +123,97 @@ message SaveDocument
 {
   kiapi.common.types.DocumentSpecifier document = 1;
 }
+
+
+// Creates a new project on disk and, optionally, opens it.  Currently only supported in CLI
+// api-server mode.  Unless skip_stub_documents is set, a minimal root schematic and board are
+// created next to the project file if they do not already exist (or come from the template).
+// Returns OpenDocumentResponse describing the project.
+// Since 11.0
+message NewProject
+{
+  // Path of the new .kicad_pro file, or of a directory (the project takes the directory's name).
+  // Missing directories are created.  Fails if the project file already exists.
+  string path = 1;
+
+  // Optional path to a project template directory (one containing a .kicad_pro and a meta/
+  // folder, as under the stock "template" directory).  If empty, the stock blank project is used.
+  optional string template_path = 2;
+
+  // If set, any currently open project is closed and the new project is opened
+  bool open = 3;
+
+  // By default a minimal root schematic and board are created next to the project file, as the
+  // project manager does.  Set this to create only the project file (NewDocument can add them
+  // later).
+  bool skip_stub_documents = 4;
+}
+
+// Creates a new, empty document in the currently open project and opens it.  Currently only
+// supported in CLI api-server mode.  Only DOCTYPE_SCHEMATIC and DOCTYPE_PCB are accepted.
+// Returns OpenDocumentResponse
+// Since 11.0
+message NewDocument
+{
+  kiapi.common.types.DocumentType type = 1;
+
+  // Optional path of the new file, relative to the project directory if not absolute.  Defaults
+  // to <project name>.kicad_sch / <project name>.kicad_pcb.  Fails if the file already exists.
+  string path = 2;
+}
+
+// Classifies the files that make up a project; see ProjectFile.
+// Since 11.0
+enum ProjectFileType
+{
+  PFT_UNKNOWN = 0;
+  PFT_PROJECT = 1;              // .kicad_pro
+  PFT_SCHEMATIC = 2;            // .kicad_sch
+  PFT_PCB = 3;                  // .kicad_pcb
+  PFT_DESIGN_RULES = 4;         // .kicad_dru
+  PFT_LOCAL_SETTINGS = 5;       // .kicad_prl
+  PFT_SYMBOL_LIBRARY = 6;       // .kicad_sym
+  PFT_FOOTPRINT_LIBRARY = 7;    // .pretty directory
+  PFT_SYMBOL_LIB_TABLE = 8;     // sym-lib-table
+  PFT_FOOTPRINT_LIB_TABLE = 9;  // fp-lib-table
+  PFT_DRAWING_SHEET = 10;       // .kicad_wks
+  PFT_JOBSET = 11;              // .kicad_jobset
+}
+
+// Since 11.0
+message ProjectFile
+{
+  // Absolute path
+  string path = 1;
+
+  ProjectFileType kind = 2;
+
+  // The document type that OpenDocument accepts for this file, or DOCTYPE_UNKNOWN if it cannot
+  // be opened as a document
+  kiapi.common.types.DocumentType type = 3;
+
+  // True if the file is currently open as a document in this KiCad instance
+  bool is_open = 4;
+
+  // For PFT_SCHEMATIC: true if this is the project's root sheet
+  bool is_root = 5;
+}
+
+// Describes the currently open project and the files in its directory.  Currently only
+// supported in CLI api-server mode.
+// Returns ProjectInfoResponse
+// Since 11.0
+message GetProjectInfo
+{
+}
+
+// Since 11.0
+message ProjectInfoResponse
+{
+  kiapi.common.types.ProjectSpecifier project = 1;
+
+  // Absolute path of the .kicad_pro file
+  string kicad_pro_path = 2;
+
+  repeated ProjectFile files = 3;
+}

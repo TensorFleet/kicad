@@ -54,6 +54,7 @@ set( KICAD_SRCS
     )
 
 set( KICAD_CLI_SRCS
+    project_template.cpp
     cli/command.cpp
     cli/command_api_server.cpp
     cli/command_export_bom.cpp

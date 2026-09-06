@@ -191,6 +191,7 @@ set( QA_EESCHEMA_SRCS
     test_history_autosave_legacy.cpp
     test_sch_api_enums.cpp
     test_sch_api_handler.cpp
+    test_sch_api_symbol_handler.cpp
     test_sch_api_hittest.cpp
     test_sch_api_proto.cpp
     test_sch_commit.cpp
