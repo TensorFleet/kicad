@@ -227,6 +227,31 @@ private:
     HANDLER_RESULT<commands::HighlightNetsResponse> handleHighlightNets(
             const HANDLER_CONTEXT<commands::HighlightNets>& aCtx );
 
+    // Since 11.0
+    HANDLER_RESULT<RatsnestResponse> handleGetRatsnest( const HANDLER_CONTEXT<GetRatsnest>& aCtx );
+
+    HANDLER_RESULT<UnroutedCountResponse> handleGetUnroutedCount( const HANDLER_CONTEXT<GetUnroutedCount>& aCtx );
+
+    HANDLER_RESULT<NetLengthsResponse> handleGetNetLengths( const HANDLER_CONTEXT<GetNetLengths>& aCtx );
+
+    HANDLER_RESULT<UpdateFootprintsFromLibraryResponse>
+    handleUpdateFootprintsFromLibrary( const HANDLER_CONTEXT<UpdateFootprintsFromLibrary>& aCtx );
+
+    HANDLER_RESULT<SetTeardropsResponse> handleSetTeardrops( const HANDLER_CONTEXT<SetTeardrops>& aCtx );
+
+    HANDLER_RESULT<SetTeardropsResponse> handleRemoveTeardrops( const HANDLER_CONTEXT<RemoveTeardrops>& aCtx );
+
+    HANDLER_RESULT<AutoplaceFootprintsResponse>
+    handleAutoplaceFootprints( const HANDLER_CONTEXT<AutoplaceFootprints>& aCtx );
+
+    HANDLER_RESULT<GlobalDeletionResponse> handleGlobalDeletion( const HANDLER_CONTEXT<GlobalDeletion>& aCtx );
+
+    /**
+     * Resolve the nets named in a request to net codes.
+     * @return an error status if a net is unknown; an empty set if the request named none
+     */
+    HANDLER_RESULT<std::set<int>> resolveNets( const google::protobuf::RepeatedPtrField<board::types::Net>& aNets );
+
 protected:
     kiapi::common::types::DocumentType thisDocumentType() const override
     {
