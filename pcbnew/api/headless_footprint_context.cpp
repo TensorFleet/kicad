@@ -21,6 +21,7 @@
 #include <board.h>
 #include <footprint.h>
 #include <footprint_library_adapter.h>
+#include <ki_exception.h>
 #include <project.h>
 #include <project_pcb.h>
 #include <tool/tool_manager.h>
@@ -121,4 +122,34 @@ bool HEADLESS_FOOTPRINT_CONTEXT::SaveFootprintInLibrary( FOOTPRINT* aFootprint,
         aFootprint->SetFPID( LIB_ID( aLibraryName, aFootprint->GetFPID().GetLibItemName() ) );
         return false;
     }
+}
+
+
+bool HEADLESS_FOOTPRINT_CONTEXT::OpenFootprint( const LIB_ID& aFPID )
+{
+    std::unique_ptr<FOOTPRINT> footprint;
+
+    try
+    {
+        FOOTPRINT_LIBRARY_ADAPTER* adapter = PROJECT_PCB::FootprintLibAdapter( m_project );
+        footprint.reset( adapter->LoadFootprintWithOptionalNickname( aFPID, true ) );
+    }
+    catch( const IO_ERROR& )
+    {
+        return false;
+    }
+
+    if( !footprint )
+        return false;
+
+    // One footprint at a time: the holder board keeps only the new one.  Tools may still refer
+    // to the old one, so they are reset first.
+    m_toolManager->ResetTools( TOOL_BASE::MODEL_RELOAD );
+    m_board->DeleteAllFootprints();
+
+    footprint->SetParent( m_board.get() );
+    m_board->Add( footprint.release() );
+    m_fpid = aFPID;
+
+    return true;
 }

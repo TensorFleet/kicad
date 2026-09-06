@@ -276,7 +276,11 @@ struct KIFACE
         return false;
     }
 
-    virtual bool HandleApiCloseDocument( const wxString& aBoardFileName,
+    /**
+     * Close a document opened by HandleApiOpenDocument.  A FILE_KIND spec with an empty path, or
+     * an FPID_KIND spec with an invalid LIB_ID, closes whichever document of that kind is open.
+     */
+    virtual bool HandleApiCloseDocument( const DOCUMENT_SPEC& aSpec,
                                          KICAD_API_SERVER* aServer,
                                          wxString* aError )
     {
@@ -492,7 +496,7 @@ public:
                                  KICAD_API_SERVER* aServer,
                                  wxString* aError = nullptr );
 
-    bool ProcessApiCloseDocument( KIWAY::FACE_T aFace, const wxString& aPath,
+    bool ProcessApiCloseDocument( KIWAY::FACE_T aFace, const KIFACE::DOCUMENT_SPEC& aSpec,
                                   KICAD_API_SERVER* aServer,
                                   wxString* aError = nullptr );
 

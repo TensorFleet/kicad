@@ -470,7 +470,7 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
                                 KICAD_API_SERVER* aServer,
                                 wxString* aError ) override;
 
-    bool HandleApiCloseDocument( const wxString& aSchFileName,
+    bool HandleApiCloseDocument( const DOCUMENT_SPEC& aSpec,
                                  KICAD_API_SERVER* aServer,
                                  wxString* aError ) override;
 
@@ -1092,47 +1092,53 @@ bool IFACE::HandleApiOpenDocument( const DOCUMENT_SPEC& aSpec,
 }
 
 
-bool IFACE::HandleApiCloseDocument( const wxString& aSchFileName, KICAD_API_SERVER* aServer,
-                                    wxString* aError )
+bool IFACE::HandleApiCloseDocument( const DOCUMENT_SPEC& aSpec, KICAD_API_SERVER* aServer, wxString* aError )
 {
     wxCHECK( aServer, false );
 
-    if( !m_openContext && !m_openSymbolContext )
+    if( aSpec.kind == DOCUMENT_SPEC::KIND::FPID_KIND )
+    {
+        if( !m_openSymbolContext )
+        {
+            if( aError )
+                *aError = wxS( "No symbol is currently open" );
+
+            return false;
+        }
+
+        if( aSpec.libId.IsValid() && m_openSymbolContext->GetLoadedLibId() != aSpec.libId )
+        {
+            if( aError )
+                *aError = wxS( "Requested symbol does not match the open symbol" );
+
+            return false;
+        }
+
+        closeCurrentSymbol( aServer );
+        return true;
+    }
+
+    if( !m_openContext )
     {
         if( aError )
-            *aError = wxS( "No document is currently open" );
+            *aError = wxS( "No schematic is currently open" );
 
         return false;
     }
 
-    // The name is a schematic file name or a symbol LIB_ID; an empty name closes everything
-    if( !aSchFileName.IsEmpty() )
+    if( !aSpec.path.IsEmpty() )
     {
-        if( m_openSymbolContext
-            && m_openSymbolContext->GetLoadedLibId().GetUniStringLibId() == aSchFileName )
+        wxFileName currentSch( m_openContext->GetCurrentFileName() );
+
+        if( currentSch.GetFullName() != wxFileName( aSpec.path ).GetFullName() )
         {
-            closeCurrentSymbol( aServer );
-            return true;
+            if( aError )
+                *aError = wxS( "Requested document does not match the open document" );
+
+            return false;
         }
-
-        if( m_openContext )
-        {
-            wxFileName currentSch( m_openContext->GetCurrentFileName() );
-
-            if( currentSch.GetFullName() == aSchFileName )
-            {
-                closeCurrentDocument( aServer );
-                return true;
-            }
-        }
-
-        if( aError )
-            *aError = wxS( "Requested document does not match the open document" );
-
-        return false;
     }
 
-    closeCurrentSymbol( aServer );
     closeCurrentDocument( aServer );
     return true;
 }

@@ -22,6 +22,7 @@
 #include <chrono>
 
 #include <boost/test/unit_test.hpp>
+#include <wx/ffile.h>
 #include <wx/filefn.h>
 #include <wx/filename.h>
 
@@ -637,5 +638,87 @@ BOOST_FIXTURE_TEST_CASE( OpenProjectWithBoardAndSchematic, API_SERVER_E2E_FIXTUR
             "OpenDocument for a different-project board should have failed" );
 
     BOOST_CHECK( Client().LastError().Contains( wxS( "already open" ) ) );
+}
+
+
+// Since 11.0: OpenLibraryItem switches the footprint served by the headless footprint document
+// (it used to dereference the missing editor frame), and closing the footprint leaves the board
+// open.
+BOOST_FIXTURE_TEST_CASE( OpenLibraryItemSwitchesHeadlessFootprint, API_SERVER_E2E_FIXTURE )
+{
+    BOOST_REQUIRE_MESSAGE( Start(), LastError() );
+
+    TEMP_KITCHEN_SINK_COPY copy;
+    wxString               error;
+    BOOST_REQUIRE_MESSAGE( copy.Create( &error ), error );
+
+    // A project-local table pointing at the QA resistor library
+    wxFileName libDir( wxString::FromUTF8( KI_TEST::GetPcbnewTestDataDir() ), wxEmptyString );
+    libDir.RemoveLastDir();
+    libDir.AppendDir( wxS( "libraries" ) );
+    libDir.AppendDir( wxS( "Resistor_SMD.pretty" ) );
+
+    wxFileName tablePath( wxFileName( copy.BoardPath() ).GetPath(), wxS( "fp-lib-table" ) );
+
+    {
+        wxFFile table( tablePath.GetFullPath(), wxS( "wb" ) );
+        BOOST_REQUIRE( table.IsOpened() );
+        BOOST_REQUIRE( table.Write( wxString::Format( wxS( "(fp_lib_table (version 7)\n  (lib (name \"Resistor_SMD\")"
+                                                          "(type \"KiCad\")(uri \"%s\")(options \"\")(descr \"\"))\n)\n" ),
+                                                     libDir.GetPath() ) ) );
+    }
+
+    kiapi::common::types::DocumentSpecifier board;
+    BOOST_REQUIRE_MESSAGE( Client().OpenDocument( copy.BoardPath(), &board ), Client().LastError() );
+
+    kiapi::common::types::DocumentSpecifier footprint;
+    BOOST_REQUIRE_MESSAGE( Client().OpenDocument( wxS( "Resistor_SMD:R_0603_1608Metric" ),
+                                                  kiapi::common::types::DOCTYPE_FOOTPRINT, &footprint ),
+                           Client().LastError() );
+    BOOST_CHECK_EQUAL( footprint.lib_id().entry_name(), "R_0603_1608Metric" );
+
+    kiapi::common::commands::OpenLibraryItem open;
+    open.set_type( kiapi::common::types::DOCTYPE_FOOTPRINT );
+    open.mutable_identifier()->set_library_nickname( "Resistor_SMD" );
+    open.mutable_identifier()->set_entry_name( "R_0402_1005Metric" );
+
+    kiapi::common::ApiResponse response;
+    BOOST_REQUIRE( Client().SendCommand( open, &response ) );
+    BOOST_REQUIRE_MESSAGE( response.status().status() == kiapi::common::AS_OK, response.status().error_message() );
+
+    // The footprint document now serves the new item
+    kiapi::common::commands::GetOpenDocuments openDocs;
+    openDocs.set_type( kiapi::common::types::DOCTYPE_FOOTPRINT );
+    BOOST_REQUIRE( Client().SendCommand( openDocs, &response ) );
+    BOOST_REQUIRE_EQUAL( response.status().status(), kiapi::common::AS_OK );
+
+    kiapi::common::commands::GetOpenDocumentsResponse openDocsResponse;
+    BOOST_REQUIRE( response.message().UnpackTo( &openDocsResponse ) );
+    BOOST_REQUIRE_EQUAL( openDocsResponse.documents_size(), 1 );
+    BOOST_CHECK_EQUAL( openDocsResponse.documents( 0 ).lib_id().entry_name(), "R_0402_1005Metric" );
+
+    int padCount = 0;
+    BOOST_REQUIRE_MESSAGE( Client().GetItemsCount( openDocsResponse.documents( 0 ), kiapi::common::types::KOT_PCB_PAD,
+                                                   &padCount ),
+                           Client().LastError() );
+    BOOST_CHECK_EQUAL( padCount, 2 );
+
+    // A footprint that does not exist is refused, and the document is unchanged
+    open.mutable_identifier()->set_entry_name( "R_does_not_exist" );
+    BOOST_REQUIRE( Client().SendCommand( open, &response ) );
+    BOOST_CHECK_EQUAL( response.status().status(), kiapi::common::AS_BAD_REQUEST );
+
+    // Closing the footprint by its current id leaves the board open
+    kiapi::common::ApiStatusCode status = kiapi::common::AS_UNKNOWN;
+    BOOST_REQUIRE( Client().CloseDocument( &openDocsResponse.documents( 0 ), &status ) );
+    BOOST_CHECK_MESSAGE( status == kiapi::common::AS_OK, Client().LastError() );
+
+    openDocs.set_type( kiapi::common::types::DOCTYPE_PCB );
+    BOOST_REQUIRE( Client().SendCommand( openDocs, &response ) );
+    BOOST_REQUIRE_EQUAL( response.status().status(), kiapi::common::AS_OK );
+    BOOST_REQUIRE( response.message().UnpackTo( &openDocsResponse ) );
+    BOOST_CHECK_EQUAL( openDocsResponse.documents_size(), 1 );
+
+    BOOST_REQUIRE( Client().CloseAllDocuments() );
 }
 BOOST_AUTO_TEST_SUITE_END()

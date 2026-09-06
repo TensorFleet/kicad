@@ -126,6 +126,31 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
         server->Publish( std::move( event ) );
     };
 
+    // How the kiface addresses a document: library items by LIB_ID, files by name.  The kiface
+    // owns the truth about what is open (OpenLibraryItem can switch the open library item), so
+    // aExact = false closes whatever document of that kind it has.
+    auto closeSpec = []( const OPEN_DOCUMENT& aDoc, bool aExact )
+    {
+        KIFACE::DOCUMENT_SPEC spec;
+
+        if( aDoc.type == types::DOCTYPE_FOOTPRINT || aDoc.type == types::DOCTYPE_SYMBOL )
+        {
+            spec.kind = KIFACE::DOCUMENT_SPEC::KIND::FPID_KIND;
+
+            if( aExact )
+                spec.libId = aDoc.libId;
+        }
+        else
+        {
+            spec.kind = KIFACE::DOCUMENT_SPEC::KIND::FILE_KIND;
+
+            if( aExact )
+                spec.path = aDoc.fileName;
+        }
+
+        return spec;
+    };
+
     auto closeAllDocuments =
             [&]( const commands::CloseAllDocuments& aRequest ) -> HANDLER_RESULT<google::protobuf::Empty>
     {
@@ -136,8 +161,8 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
                 continue;
 
             wxString error;
-            wxString name = doc.libId.IsValid() ? doc.libId.GetUniStringLibId() : doc.fileName;
-            aKiway.ProcessApiCloseDocument( faceForDocument( doc.type ), name, server.get(), &error );
+            aKiway.ProcessApiCloseDocument( faceForDocument( doc.type ), closeSpec( doc, false ), server.get(),
+                                            &error );
         }
 
         openDocuments.clear();
@@ -433,13 +458,8 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
                     return tl::unexpected( e );
                 }
 
-                if( it->libId != fpid )
-                {
-                    ApiResponseStatus e;
-                    e.set_status( ApiStatusCode::AS_BAD_REQUEST );
-                    e.set_error_message( "Requested document does not match the open document" );
-                    return tl::unexpected( e );
-                }
+                // The kiface checks it against the item actually open (see closeSpec)
+                it->libId = fpid;
             }
         }
         else
@@ -455,9 +475,11 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
         else
         {
             wxString error;
-            wxString name = it->libId.IsValid() ? it->libId.GetUniStringLibId() : it->fileName;
+            bool     exact = ( it->type != types::DOCTYPE_FOOTPRINT && it->type != types::DOCTYPE_SYMBOL )
+                         || aRequest.document().has_lib_id();
 
-            if( !aKiway.ProcessApiCloseDocument( faceForDocument( it->type ), name, server.get(), &error ) )
+            if( !aKiway.ProcessApiCloseDocument( faceForDocument( it->type ), closeSpec( *it, exact ), server.get(),
+                                                 &error ) )
             {
                 ApiResponseStatus e;
                 e.set_status( ApiStatusCode::AS_BAD_REQUEST );

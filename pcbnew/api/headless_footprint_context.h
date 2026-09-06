@@ -58,6 +58,8 @@ public:
 
     bool SaveFootprintInLibrary( FOOTPRINT* aFootprint, const wxString& aLibraryName ) override;
 
+    bool OpenFootprint( const LIB_ID& aFPID ) override;
+
 private:
     std::unique_ptr<BOARD> m_board;
     LIB_ID                 m_fpid;

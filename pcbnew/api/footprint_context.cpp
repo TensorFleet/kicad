@@ -70,6 +70,12 @@ public:
         return m_frame->SaveFootprintInLibrary( aFootprint, aLibraryName );
     }
 
+    bool OpenFootprint( const LIB_ID& aFPID ) override
+    {
+        m_frame->LoadFootprintFromLibrary( aFPID );
+        return m_frame->GetLoadedFPID() == aFPID;
+    }
+
 private:
     FOOTPRINT_EDIT_FRAME* m_frame;
 };

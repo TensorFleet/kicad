@@ -597,7 +597,7 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
                                 KICAD_API_SERVER* aServer,
                                 wxString* aError ) override;
 
-    bool HandleApiCloseDocument( const wxString& aBoardFileName,
+    bool HandleApiCloseDocument( const DOCUMENT_SPEC& aSpec,
                                  KICAD_API_SERVER* aServer,
                                  wxString* aError ) override;
 
@@ -618,6 +618,8 @@ private:
     std::atomic_bool                     m_libraryPreloadAbort;
 
     void closeCurrentDocument( KICAD_API_SERVER* aServer );
+
+    void closeCurrentFootprint( KICAD_API_SERVER* aServer );
 
     KIWAY* m_kiway = nullptr;
     std::shared_ptr<HEADLESS_PCB_CONTEXT>       m_openContext;
@@ -866,7 +868,11 @@ void IFACE::closeCurrentDocument( KICAD_API_SERVER* aServer )
     // The jobs handler caches the last-loaded board. Clear it so the next job
     // uses the board from the newly opened document rather than a stale copy.
     m_jobHandler->ClearCachedBoard();
+}
 
+
+void IFACE::closeCurrentFootprint( KICAD_API_SERVER* aServer )
+{
     if( m_openFpHandler )
     {
         if( aServer )
@@ -959,7 +965,8 @@ bool IFACE::handleOpenFootprint( const wxString& aProjectPath, const wxString& a
         return false;
     }
 
-    closeCurrentDocument( aServer );
+    // One footprint at a time; the board (if any) stays open
+    closeCurrentFootprint( aServer );
     m_openFpContext = std::move( newContext );
 
     m_openFpHandler = std::make_unique<API_HANDLER_FOOTPRINT>( m_openFpContext, nullptr );
@@ -1068,23 +1075,46 @@ bool IFACE::handleOpenPcb( const wxString& aPath, KICAD_API_SERVER* aServer, wxS
 }
 
 
-bool IFACE::HandleApiCloseDocument( const wxString& aFileName, KICAD_API_SERVER* aServer, wxString* aError )
+bool IFACE::HandleApiCloseDocument( const DOCUMENT_SPEC& aSpec, KICAD_API_SERVER* aServer, wxString* aError )
 {
     wxCHECK( aServer, false );
 
-    if( !m_openContext && !m_openFpContext )
+    if( aSpec.kind == DOCUMENT_SPEC::KIND::FPID_KIND )
+    {
+        if( !m_openFpContext )
+        {
+            if( aError )
+                *aError = wxS( "No footprint is currently open" );
+
+            return false;
+        }
+
+        // The open footprint may have been switched by OpenLibraryItem since it was opened
+        if( aSpec.libId.IsValid() && m_openFpContext->GetLoadedFPID() != aSpec.libId )
+        {
+            if( aError )
+                *aError = wxS( "Requested footprint does not match the open footprint" );
+
+            return false;
+        }
+
+        closeCurrentFootprint( aServer );
+        return true;
+    }
+
+    if( !m_openContext )
     {
         if( aError )
-            *aError = wxS( "No document is currently open" );
+            *aError = wxS( "No board is currently open" );
 
         return false;
     }
 
-    if( !aFileName.IsEmpty() && m_openContext )
+    if( !aSpec.path.IsEmpty() )
     {
         wxFileName currentBoard( m_openContext->GetCurrentFileName() );
 
-        if( currentBoard.GetFullName() != aFileName )
+        if( currentBoard.GetFullName() != wxFileName( aSpec.path ).GetFullName() )
         {
             if( aError )
                 *aError = wxS( "Requested document does not match the open document" );
