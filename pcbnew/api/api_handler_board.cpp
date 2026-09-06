@@ -553,11 +553,12 @@ HANDLER_RESULT<GetItemsResponse> API_HANDLER_BOARD::handleGetItemsById(
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     GetItemsResponse response;
@@ -596,12 +597,12 @@ HANDLER_RESULT<SelectionResponse> API_HANDLER_BOARD::handleGetSelection(
     if( std::optional<ApiResponseStatus> headless = checkForHeadless( "GetSelection" ) )
         return tl::unexpected( *headless );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     std::set<KICAD_T> filter;
@@ -633,12 +634,12 @@ HANDLER_RESULT<Empty> API_HANDLER_BOARD::handleClearSelection(
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     TOOL_MANAGER* mgr = toolManager();
@@ -658,12 +659,12 @@ HANDLER_RESULT<SelectionResponse> API_HANDLER_BOARD::handleAddToSelection(
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     TOOL_MANAGER* mgr = toolManager();
@@ -698,12 +699,12 @@ HANDLER_RESULT<SelectionResponse> API_HANDLER_BOARD::handleRemoveFromSelection(
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     TOOL_MANAGER* mgr = toolManager();
@@ -820,12 +821,12 @@ HANDLER_RESULT<GetBoundingBoxResponse> API_HANDLER_BOARD::handleGetBoundingBox(
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     GetBoundingBoxResponse response;
