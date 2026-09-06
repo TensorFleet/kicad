@@ -18,6 +18,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <map>
+
 #include <fmt/format.h>
 #include <wx/app.h>
 #include <wx/datetime.h>
@@ -42,6 +44,34 @@
 #endif
 
 using kiapi::common::ApiRequest, kiapi::common::ApiResponse, kiapi::common::ApiStatusCode;
+using kiapi::common::commands::GetSupportedCommands, kiapi::common::commands::GetSupportedCommandsResponse;
+using kiapi::common::commands::SupportedCommand;
+
+
+/**
+ * Handler for commands that concern the API server itself rather than a document or editor.
+ * Owned by the server and registered before any other handler.
+ */
+class API_HANDLER_SERVER : public API_HANDLER
+{
+public:
+    API_HANDLER_SERVER( KICAD_API_SERVER* aServer ) :
+            API_HANDLER(),
+            m_server( aServer )
+    {
+        registerHandler<GetSupportedCommands, GetSupportedCommandsResponse>(
+                &API_HANDLER_SERVER::handleGetSupportedCommands );
+    }
+
+private:
+    HANDLER_RESULT<GetSupportedCommandsResponse> handleGetSupportedCommands(
+            const HANDLER_CONTEXT<GetSupportedCommands>& aCtx )
+    {
+        return m_server->SupportedCommands();
+    }
+
+    KICAD_API_SERVER* m_server;
+};
 
 
 wxString KICAD_API_SERVER::s_logFileName = "api.log";
@@ -52,9 +82,12 @@ wxDEFINE_EVENT( API_REQUEST_EVENT, wxCommandEvent );
 
 KICAD_API_SERVER::KICAD_API_SERVER( bool aAutoStart ) :
         wxEvtHandler(),
+        m_serverHandler( std::make_unique<API_HANDLER_SERVER>( this ) ),
         m_token( KIID().AsStdString() ),
         m_readyToReply( false )
 {
+    m_handlers.insert( m_serverHandler.get() );
+
     if( !aAutoStart )
         return;
 
@@ -208,7 +241,45 @@ void KICAD_API_SERVER::RegisterHandler( API_HANDLER* aHandler )
 
 void KICAD_API_SERVER::DeregisterHandler( API_HANDLER* aHandler )
 {
+    if( aHandler == m_serverHandler.get() )
+        return;
+
     m_handlers.erase( aHandler );
+}
+
+
+GetSupportedCommandsResponse KICAD_API_SERVER::SupportedCommands() const
+{
+    // Keyed by request type name so that a command served by several handlers (for example,
+    // GetOpenDocuments in both the board and schematic handlers) is reported once, sorted.
+    std::map<std::string, SupportedCommand> commands;
+
+    for( API_HANDLER* handler : m_handlers )
+    {
+        for( const API_HANDLER::SUPPORTED_COMMAND& cmd : handler->SupportedCommands() )
+        {
+            bool headless = ( cmd.Mode == API_HANDLER::HANDLER_MODE::HEADLESS_CAPABLE );
+            auto it = commands.find( cmd.RequestTypeName );
+
+            if( it != commands.end() )
+            {
+                it->second.set_headless( it->second.headless() || headless );
+                continue;
+            }
+
+            SupportedCommand& entry = commands[cmd.RequestTypeName];
+            entry.set_type_url( fmt::format( "type.googleapis.com/{}", cmd.RequestTypeName ) );
+            entry.set_response_type_url( fmt::format( "type.googleapis.com/{}", cmd.ResponseTypeName ) );
+            entry.set_headless( headless );
+        }
+    }
+
+    GetSupportedCommandsResponse response;
+
+    for( auto& [name, cmd] : commands )
+        *response.add_commands() = std::move( cmd );
+
+    return response;
 }
 
 

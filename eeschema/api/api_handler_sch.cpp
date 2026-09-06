@@ -131,16 +131,18 @@ API_HANDLER_SCH::API_HANDLER_SCH( std::shared_ptr<SCH_CONTEXT> aContext,
             &API_HANDLER_SCH::handleSaveDocument );
     registerHandler<SaveCopyOfDocument, google::protobuf::Empty>(
             &API_HANDLER_SCH::handleSaveCopyOfDocument );
-    registerHandler<RevertDocument, google::protobuf::Empty>( &API_HANDLER_SCH::handleRevertDocument );
+    registerHandler<RevertDocument, google::protobuf::Empty>(
+            &API_HANDLER_SCH::handleRevertDocument, HANDLER_MODE::GUI_ONLY );
 
     registerHandler<GetItems, GetItemsResponse>( &API_HANDLER_SCH::handleGetItems );
     registerHandler<GetItemsById, GetItemsResponse>( &API_HANDLER_SCH::handleGetItemsById );
 
-    registerHandler<GetSelection, SelectionResponse>( &API_HANDLER_SCH::handleGetSelection );
-    registerHandler<ClearSelection, Empty>( &API_HANDLER_SCH::handleClearSelection );
-    registerHandler<AddToSelection, SelectionResponse>( &API_HANDLER_SCH::handleAddToSelection );
+    registerHandler<GetSelection, SelectionResponse>( &API_HANDLER_SCH::handleGetSelection, HANDLER_MODE::GUI_ONLY );
+    registerHandler<ClearSelection, Empty>( &API_HANDLER_SCH::handleClearSelection, HANDLER_MODE::GUI_ONLY );
+    registerHandler<AddToSelection, SelectionResponse>(
+            &API_HANDLER_SCH::handleAddToSelection, HANDLER_MODE::GUI_ONLY );
     registerHandler<RemoveFromSelection, SelectionResponse>(
-            &API_HANDLER_SCH::handleRemoveFromSelection );
+            &API_HANDLER_SCH::handleRemoveFromSelection, HANDLER_MODE::GUI_ONLY );
 
     registerHandler<RunSchematicJobExportSvg, types::RunJobResponse>(
             &API_HANDLER_SCH::handleRunSchematicJobExportSvg );
@@ -159,8 +161,10 @@ API_HANDLER_SCH::API_HANDLER_SCH( std::shared_ptr<SCH_CONTEXT> aContext,
     registerHandler<SetPageSettings, types::PageSettings>( &API_HANDLER_SCH::handleSetPageSettings );
     registerHandler<GetSchematicNetlist, SchematicNetlistResponse>( &API_HANDLER_SCH::handleGetSchematicNetlist );
     registerHandler<CrossProbeAnnounce, CrossProbeAnnounceResponse>( &API_HANDLER_SCH::handleCrossProbeAnnounce );
-    registerHandler<SyncSelection, SyncSelectionResponse>( &API_HANDLER_SCH::handleSyncSelection );
-    registerHandler<HighlightNets, HighlightNetsResponse>( &API_HANDLER_SCH::handleHighlightNets );
+    registerHandler<SyncSelection, SyncSelectionResponse>(
+            &API_HANDLER_SCH::handleSyncSelection, HANDLER_MODE::GUI_ONLY );
+    registerHandler<HighlightNets, HighlightNetsResponse>(
+            &API_HANDLER_SCH::handleHighlightNets, HANDLER_MODE::GUI_ONLY );
     registerHandler<GetVariants, VariantsResponse>( &API_HANDLER_SCH::handleGetVariants );
     registerHandler<AddVariant, Empty>( &API_HANDLER_SCH::handleAddVariant );
     registerHandler<DeleteVariant, Empty>( &API_HANDLER_SCH::handleDeleteVariant );

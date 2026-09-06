@@ -30,8 +30,10 @@
 #include <wx/filename.h>
 
 #include <kicommon.h>
+#include <api/common/commands/base_commands.pb.h>
 
 class API_HANDLER;
+class API_HANDLER_SERVER;
 class KINNG_REQUEST_SERVER;
 class wxEvtHandler;
 
@@ -65,6 +67,15 @@ public:
     void RegisterHandler( API_HANDLER* aHandler );
 
     void DeregisterHandler( API_HANDLER* aHandler );
+
+    /**
+     * Enumerate every command served by the currently-registered handlers (including the
+     * server's own commands).  Commands served by more than one handler are listed once; such a
+     * command is reported as headless-capable if any of its handlers can serve it headless.
+     *
+     * @return the response for the GetSupportedCommands API command
+     */
+    kiapi::common::commands::GetSupportedCommandsResponse SupportedCommands() const;
 
     void SetReadyToReply( bool aReady = true )
     {
@@ -112,6 +123,9 @@ private:
     void log( const std::string& aOutput );
 
     std::unique_ptr<KINNG_REQUEST_SERVER> m_server;
+
+    /// Serves commands that concern the server itself (GetSupportedCommands); always registered
+    std::unique_ptr<API_HANDLER_SERVER> m_serverHandler;
 
     std::set<API_HANDLER*> m_handlers;
 
