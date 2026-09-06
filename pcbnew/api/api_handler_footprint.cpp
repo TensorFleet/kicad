@@ -228,6 +228,7 @@ HANDLER_RESULT<Empty> API_HANDLER_FOOTPRINT::handleSaveDocument(
         return tl::unexpected( e );
     }
 
+    bumpRevision();
     return Empty();
 }
 
@@ -297,6 +298,7 @@ HANDLER_RESULT<Empty> API_HANDLER_FOOTPRINT::handleRevertDocument(
     frame()->GetScreen()->SetContentModified( false );
     frame()->RevertFootprint(); // dialog is suppressed by ^
 
+    bumpRevision();
     return Empty();
 }
 

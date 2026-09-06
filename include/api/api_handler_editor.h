@@ -26,6 +26,7 @@
 #include <api/common/commands/editor_commands.pb.h>
 #include <base_units.h>
 #include <commit.h>
+#include <cstdint>
 #include <google/protobuf/empty.pb.h>
 #include <kiid.h>
 #include <page_info.h>
@@ -96,6 +97,16 @@ protected:
     HANDLER_RESULT<types::PageSettings> handleSetPageSettings(
             const HANDLER_CONTEXT<commands::SetPageSettings>& aCtx );
 
+    HANDLER_RESULT<commands::DocumentRevisionResponse> handleGetDocumentRevision(
+            const HANDLER_CONTEXT<commands::GetDocumentRevision>& aCtx );
+
+    /**
+     * Record that the document was changed (or saved/reverted) so that GetDocumentRevision
+     * reports a new value.  Called by pushCurrentCommit and onModified; handlers that change
+     * the document without going through either must call it themselves.
+     */
+    void bumpRevision() { ++m_revision; }
+
     HANDLER_RESULT<google::protobuf::Empty> handleRefreshEditor(
             const HANDLER_CONTEXT<commands::RefreshEditor>& aCtx );
 
@@ -161,7 +172,11 @@ protected:
 
     virtual void setDrawingSheetFileName( const wxString& aFileName ) {}
 
-    virtual void onModified() {}
+    /**
+     * Called after the document was changed outside of a commit.  Overrides must call the base
+     * implementation, which advances the document revision.
+     */
+    virtual void onModified() { bumpRevision(); }
 
 protected:
     std::map<std::string, std::pair<KIID, std::unique_ptr<COMMIT>>> m_commits;
@@ -169,6 +184,9 @@ protected:
     std::set<std::string> m_activeClients;
 
     EDA_BASE_FRAME* m_frame;
+
+    /// Document revision counter reported by GetDocumentRevision; see bumpRevision
+    uint64_t m_revision;
 };
 
 #endif //KICAD_API_HANDLER_EDITOR_H

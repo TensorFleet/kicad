@@ -244,6 +244,7 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleSaveDocument(
         return tl::unexpected( documentValidation.error() );
 
     pcbContext()->SaveBoard();
+    bumpRevision();
     return Empty();
 }
 
@@ -294,6 +295,7 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleSaveCopyOfDocument(
     if( board->GetFileName().Matches( boardPath.GetFullPath() ) )
     {
         pcbContext()->SaveBoard();
+        bumpRevision();
         return Empty();
     }
 
@@ -339,6 +341,7 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleRevertDocument(
     frame()->ReleaseFile();
     frame()->OpenProjectFiles( std::vector<wxString>( 1, fn.GetFullPath() ), KICTL_REVERT );
 
+    bumpRevision();
     return Empty();
 }
 
@@ -621,6 +624,8 @@ HANDLER_RESULT<BoardEnabledLayersResponse> API_HANDLER_PCB::handleSetBoardEnable
         if( modified )
             frame()->OnModify();
     }
+
+    bumpRevision();
 
     BoardEnabledLayersResponse response;
 
@@ -1151,6 +1156,8 @@ HANDLER_RESULT<BoardDesignRulesResponse> API_HANDLER_PCB::handleSetBoardDesignRu
         frame()->UpdateUserInterface();
     }
 
+    bumpRevision();
+
     HANDLER_CONTEXT<GetBoardDesignRules> getCtx = { aCtx.ClientName, GetBoardDesignRules() };
     *getCtx.Request.mutable_board() = aCtx.Request.board();
 
@@ -1338,6 +1345,7 @@ HANDLER_RESULT<CustomRulesResponse> API_HANDLER_PCB::handleSetCustomDesignRules(
     }
 
     file.Close();
+    bumpRevision();
 
     HANDLER_CONTEXT<GetCustomDesignRules> getCtx = { aCtx.ClientName, GetCustomDesignRules() };
     *getCtx.Request.mutable_board() = aCtx.Request.board();
@@ -1454,6 +1462,7 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleSetBoardOrigin(
     }
     }
 
+    bumpRevision();
     return Empty();
 }
 
@@ -1531,6 +1540,7 @@ void API_HANDLER_PCB::setDrawingSheetFileName( const wxString& aFileName )
 
 void API_HANDLER_PCB::onModified()
 {
+    API_HANDLER_EDITOR::onModified();
     pcbContext()->SetContentModified();
 
     if( frame() )
@@ -1907,6 +1917,7 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleRefillZones( const HANDLER_CONTEXT<
         mgr->GetTool<ZONE_FILLER_TOOL>()->PostFillRefresh( frame() == nullptr );
     }
 
+    bumpRevision();
     return Empty();
 }
 
@@ -1965,7 +1976,10 @@ HANDLER_RESULT<ImportNetlistResponse> API_HANDLER_PCB::handleImportNetlist( cons
     const bool success = updater->UpdateNetlist( netlist );
 
     if( !aCtx.Request.dry_run() && success )
+    {
         ctx->OnNetlistChanged( *updater );
+        bumpRevision();
+    }
 
     ImportNetlistResponse response;
     response.set_report( reporter.GetMessages().ToUTF8() );
@@ -2137,6 +2151,7 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleSetBoardPlotSettings( const HANDLER
     if( frame() )
         frame()->OnModify();
 
+    bumpRevision();
     return Empty();
 }
 
@@ -2176,6 +2191,7 @@ HANDLER_RESULT<InjectDrcErrorResponse> API_HANDLER_PCB::handleInjectDrcError(
     COMMIT* commit = getCurrentCommit( aCtx.ClientName );
     commit->Add( marker );
     commit->Push( wxS( "API injected DRC marker" ) );
+    bumpRevision();
 
     InjectDrcErrorResponse response;
     response.mutable_marker()->set_value( marker->GetUUID().AsStdString() );

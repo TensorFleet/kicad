@@ -451,6 +451,26 @@ message SetPageSettings
   kiapi.common.types.PageSettings page_settings = 2;
 }
 
+// Returns the document's revision counter.  The counter starts at 0 when the document is opened
+// and increases every time the document is changed through the API (a commit is pushed, settings
+// such as design rules, page settings or the stackup change, zones are refilled, a netlist is
+// imported) and when the document is saved or reverted.  Edits made interactively in the KiCad
+// GUI are not counted yet.  Clients can poll this cheaply to detect changes made by other
+// clients until change notifications are available.
+// Returns DocumentRevisionResponse
+// Since 11.0
+message GetDocumentRevision
+{
+  kiapi.common.types.DocumentSpecifier document = 1;
+}
+
+// Since 11.0
+message DocumentRevisionResponse
+{
+  // Monotonic within one open document; not persisted, not comparable across documents
+  uint64 revision = 1;
+}
+
 message SaveDocumentToString
 {
   kiapi.common.types.DocumentSpecifier document = 1;
