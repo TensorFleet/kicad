@@ -43,6 +43,10 @@ add_executable( qa_api
 
 add_dependencies( qa_api pcbnew )
 
+# The E2E tests launch the real kicad-cli api-server, which in turn dlopens the
+# pcbnew and eeschema kifaces, so all three have to exist before qa_api runs.
+add_dependencies( qa_api kicad-cli pcbnew_kiface eeschema_kiface )
+
 target_link_libraries( qa_api
     kiapi
     qa_utils
