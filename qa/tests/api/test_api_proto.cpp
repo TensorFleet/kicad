@@ -206,8 +206,14 @@ BOOST_AUTO_TEST_CASE( FileFormatStateRoundTrip )
 
         PCB_TEXT copy( &footprint );
         BOOST_REQUIRE( copy.Deserialize( any ) );
-        BOOST_CHECK_EQUAL( copy.GetTextAngle().AsDegrees(), 45.0 );
+
+        // The footprint-relative angle is what the file format writes, and 45 degrees of text
+        // in a footprint turned 90 degrees is 315 of it
+        BOOST_CHECK_EQUAL( copy.GetLibTextAngle().AsDegrees(), 315.0 );
         BOOST_CHECK_EQUAL( copy.GetLibTextAngle().AsDegrees(), text->GetLibTextAngle().AsDegrees() );
+        BOOST_CHECK_EQUAL( copy.GetTextAngle().AsDegrees(), text->GetTextAngle().AsDegrees() );
+        BOOST_CHECK_EQUAL( copy.GetAttributes().m_Angle.AsDegrees(),
+                           text->GetAttributes().m_Angle.AsDegrees() );
     }
 
     // A board-level text keeps its rotation

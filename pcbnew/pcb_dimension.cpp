@@ -345,7 +345,9 @@ void PCB_DIMENSION_BASE::Serialize( google::protobuf::Any &aContainer ) const
 
     types::Text* text = dimension.mutable_text();
     text->set_text( GetValueText() );
-    text->mutable_attributes()->mutable_angle()->set_value_degrees( GetTextAngle().AsDegrees() );
+    EDA_ANGLE angle = GetTextAngle();
+    angle.Normalize();
+    text->mutable_attributes()->mutable_angle()->set_value_degrees( angle.AsDegrees() );
 
     dimension.set_override_text_enabled( m_overrideTextEnabled );
     dimension.set_override_text( m_valueString.ToUTF8() );
