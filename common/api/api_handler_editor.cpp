@@ -32,7 +32,8 @@ using namespace kiapi::common::commands;
 
 API_HANDLER_EDITOR::API_HANDLER_EDITOR( EDA_BASE_FRAME* aFrame ) :
         API_HANDLER(),
-        m_frame( aFrame )
+        m_frame( aFrame ),
+        m_revision( 0 )
 {
     registerHandler<BeginCommit, BeginCommitResponse>( &API_HANDLER_EDITOR::handleBeginCommit );
     registerHandler<EndCommit, EndCommitResponse>( &API_HANDLER_EDITOR::handleEndCommit );
@@ -44,6 +45,30 @@ API_HANDLER_EDITOR::API_HANDLER_EDITOR( EDA_BASE_FRAME* aFrame ) :
     registerHandler<SetTitleBlockInfo, google::protobuf::Empty>( &API_HANDLER_EDITOR::handleSetTitleBlockInfo );
     registerHandler<RefreshEditor, google::protobuf::Empty>( &API_HANDLER_EDITOR::handleRefreshEditor );
     registerHandler<FocusOnItem, FocusOnItemResponse>( &API_HANDLER_EDITOR::handleFocusOnItem );
+    registerHandler<GetDocumentRevision, DocumentRevisionResponse>(
+            &API_HANDLER_EDITOR::handleGetDocumentRevision );
+}
+
+
+HANDLER_RESULT<DocumentRevisionResponse> API_HANDLER_EDITOR::handleGetDocumentRevision(
+        const HANDLER_CONTEXT<GetDocumentRevision>& aCtx )
+{
+    // Another editor's document: let its handler answer
+    if( aCtx.Request.document().type() != thisDocumentType() )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_UNHANDLED );
+        return tl::unexpected( e );
+    }
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.document() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    DocumentRevisionResponse response;
+    response.set_revision( m_revision );
+    return response;
 }
 
 
@@ -240,6 +265,8 @@ void API_HANDLER_EDITOR::pushCurrentCommit( const std::string& aClientName,
     it->second.second->Push( aMessage.IsEmpty() ? m_defaultCommitMessage : aMessage );
     m_commits.erase( it );
     m_activeClients.erase( aClientName );
+
+    bumpRevision();
 }
 
 

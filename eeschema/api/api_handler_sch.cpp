@@ -319,6 +319,7 @@ HANDLER_RESULT<google::protobuf::Empty> API_HANDLER_SCH::handleSaveDocument( con
         return tl::unexpected( e );
     }
 
+    bumpRevision();
     return google::protobuf::Empty();
 }
 
@@ -425,6 +426,7 @@ API_HANDLER_SCH::handleRevertDocument( const HANDLER_CONTEXT<RevertDocument>& aC
     m_frame->ReleaseFile();
     m_frame->OpenProjectFiles( std::vector<wxString>( 1, fn.GetFullPath() ), KICTL_REVERT );
 
+    bumpRevision();
     return google::protobuf::Empty();
 }
 
@@ -1257,6 +1259,8 @@ void API_HANDLER_SCH::setDrawingSheetFileName( const wxString& aFileName )
 
 void API_HANDLER_SCH::onModified()
 {
+    API_HANDLER_EDITOR::onModified();
+
     if( m_frame )
     {
         m_frame->Refresh();

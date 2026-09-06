@@ -51,7 +51,7 @@ using kiapi::common::commands::SupportedCommand;
 
 std::string typeUrl( const google::protobuf::Message& aMessage )
 {
-    return "type.googleapis.com/" + aMessage.GetTypeName();
+    return "type.googleapis.com/" + std::string( aMessage.GetTypeName() );
 }
 
 

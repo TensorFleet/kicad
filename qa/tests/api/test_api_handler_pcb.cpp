@@ -619,4 +619,77 @@ BOOST_AUTO_TEST_CASE( SaveItemsToStringHeadless )
 }
 
 
+BOOST_AUTO_TEST_CASE( GetDocumentRevisionTracksChanges )
+{
+    BOARD* board = loadBoard( wxS( "issue5830" ) );
+
+    API_HANDLER_PCB handler( m_context );
+
+    kiapi::common::commands::GetDocumentRevision query;
+    *query.mutable_document() = pcbDocument( board );
+
+    auto revision = [&]() -> uint64_t
+    {
+        kiapi::common::ApiRequest request = makeRequest( query );
+        API_RESULT                result = handler.Handle( request );
+
+        BOOST_REQUIRE_MESSAGE( result.has_value(), "GetDocumentRevision failed: " << result.error().error_message() );
+
+        kiapi::common::commands::DocumentRevisionResponse response;
+        BOOST_REQUIRE( result->message().UnpackTo( &response ) );
+        return response.revision();
+    };
+
+    // Freshly opened, and reading does not count as a change
+    BOOST_CHECK_EQUAL( revision(), 0u );
+    BOOST_CHECK_EQUAL( revision(), 0u );
+
+    // A settings change outside of a commit
+    kiapi::board::commands::SetBoardOrigin origin;
+    *origin.mutable_board() = pcbDocument( board );
+    origin.set_type( kiapi::board::commands::BOT_GRID );
+    origin.mutable_origin()->set_x_nm( 1000000 );
+    origin.mutable_origin()->set_y_nm( 2000000 );
+
+    kiapi::common::ApiRequest request = makeRequest( origin );
+    BOOST_REQUIRE( handler.Handle( request ).has_value() );
+    BOOST_CHECK_EQUAL( revision(), 1u );
+
+    // A commit: the revision advances when it is pushed, not when it is opened
+    request = makeBeginCommitRequest();
+    API_RESULT begin = handler.Handle( request );
+    BOOST_REQUIRE( begin.has_value() );
+
+    kiapi::common::commands::BeginCommitResponse beginResponse;
+    BOOST_REQUIRE( begin->message().UnpackTo( &beginResponse ) );
+    BOOST_CHECK_EQUAL( revision(), 1u );
+
+    kiapi::common::commands::EndCommit end;
+    *end.mutable_id() = beginResponse.id();
+    end.set_action( kiapi::common::commands::CMA_COMMIT );
+
+    request = makeRequest( end );
+    BOOST_REQUIRE( handler.Handle( request ).has_value() );
+    BOOST_CHECK_EQUAL( revision(), 2u );
+
+    // Zone refills change the board too
+    request = makeRefillRequest( board, {} );
+    BOOST_REQUIRE( handler.Handle( request ).has_value() );
+    BOOST_CHECK_EQUAL( revision(), 3u );
+
+    // Documents that are not open are an error; other document types belong to other handlers
+    query.mutable_document()->set_board_filename( "not_open.kicad_pcb" );
+    request = makeRequest( query );
+    API_RESULT result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_BAD_REQUEST );
+
+    query.mutable_document()->set_type( kiapi::common::types::DOCTYPE_SCHEMATIC );
+    request = makeRequest( query );
+    result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_UNHANDLED );
+}
+
+
 BOOST_AUTO_TEST_SUITE_END()
