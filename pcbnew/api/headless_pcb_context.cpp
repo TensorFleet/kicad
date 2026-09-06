@@ -22,6 +22,7 @@
 #include <board.h>
 #include <board_loader.h>
 #include <component_classes/component_class_manager.h>
+#include <connectivity/connectivity_data.h>
 #include <drc/drc_engine.h>
 #include <footprint.h>
 #include <netlist_reader/board_netlist_updater.h>
@@ -202,6 +203,15 @@ void HEADLESS_PCB_CONTEXT::OnNetlistChanged( BOARD_NETLIST_UPDATER& aUpdater )
 
     std::vector<FOOTPRINT*> newFootprints = aUpdater.GetAddedFootprints();
     SpreadFootprints( &newFootprints, { 0, 0 }, true );
+
+    // The updater flags new footprints so that connectivity ignores them until the editor's drag
+    // places them and clears the flag; there is no drag here, so they enter connectivity now,
+    // at their spread positions.
+    for( FOOTPRINT* footprint : newFootprints )
+    {
+        footprint->SetAttributes( footprint->GetAttributes() & ~FP_JUST_ADDED );
+        board->GetConnectivity()->Add( footprint );
+    }
 
     board->CompileRatsnest();
 }

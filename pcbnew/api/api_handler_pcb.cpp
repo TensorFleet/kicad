@@ -93,6 +93,15 @@
 #include <api/common/types/base_types.pb.h>
 #include <api/board/board_rules.pb.h>
 #include <connectivity/connectivity_data.h>
+#include <connectivity/connectivity_algo.h>
+#include <autorouter/ar_autoplacer.h>
+#include <length_delay_calculation/length_delay_calculation.h>
+#include <netlist_reader/pcb_netlist_utils.h>
+#include <pcb_generator.h>
+#include <generators/pcb_tuning_pattern.h>
+#include <ratsnest/ratsnest_data.h>
+#include <teardrop/teardrop.h>
+#include <teardrop/teardrop_parameters.h>
 #include <google/protobuf/util/json_util.h>
 #include <drc/drc_rule_condition.h>
 #include <drc/drc_rule_parser.h>
@@ -207,6 +216,17 @@ API_HANDLER_PCB::API_HANDLER_PCB( std::shared_ptr<PCB_CONTEXT> aContext, PCB_EDI
     registerHandler<CrossProbeAnnounce, CrossProbeAnnounceResponse>( &API_HANDLER_PCB::handleCrossProbeAnnounce );
     registerHandler<SyncSelection, SyncSelectionResponse>(
             &API_HANDLER_PCB::handleSyncSelection, HANDLER_MODE::GUI_ONLY );
+    // Since 11.0
+    registerHandler<GetRatsnest, RatsnestResponse>( &API_HANDLER_PCB::handleGetRatsnest );
+    registerHandler<GetUnroutedCount, UnroutedCountResponse>( &API_HANDLER_PCB::handleGetUnroutedCount );
+    registerHandler<GetNetLengths, NetLengthsResponse>( &API_HANDLER_PCB::handleGetNetLengths );
+    registerHandler<UpdateFootprintsFromLibrary, UpdateFootprintsFromLibraryResponse>(
+            &API_HANDLER_PCB::handleUpdateFootprintsFromLibrary );
+    registerHandler<SetTeardrops, SetTeardropsResponse>( &API_HANDLER_PCB::handleSetTeardrops );
+    registerHandler<RemoveTeardrops, SetTeardropsResponse>( &API_HANDLER_PCB::handleRemoveTeardrops );
+    registerHandler<AutoplaceFootprints, AutoplaceFootprintsResponse>( &API_HANDLER_PCB::handleAutoplaceFootprints );
+    registerHandler<GlobalDeletion, GlobalDeletionResponse>( &API_HANDLER_PCB::handleGlobalDeletion );
+
     registerHandler<HighlightNets, HighlightNetsResponse>(
             &API_HANDLER_PCB::handleHighlightNets, HANDLER_MODE::GUI_ONLY );
 }
@@ -3723,6 +3743,742 @@ API_HANDLER_PCB::handleGetCurrentVariant( const HANDLER_CONTEXT<GetCurrentVarian
 
     if( wxString current = pcbContext()->GetBoard()->GetCurrentVariant(); !current.IsEmpty() )
         response.set_name( current.ToUTF8() );
+
+    return response;
+}
+
+
+//// Ratsnest and net lengths (Since 11.0) ////
+
+HANDLER_RESULT<std::set<int>>
+API_HANDLER_PCB::resolveNets( const google::protobuf::RepeatedPtrField<board::types::Net>& aNets )
+{
+    std::set<int> codes;
+
+    for( const board::types::Net& net : aNets )
+    {
+        NETINFO_ITEM* item = board()->FindNet( wxString::FromUTF8( net.name() ) );
+
+        if( !item )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( fmt::format( "net '{}' does not exist on the board", net.name() ) );
+            return tl::unexpected( e );
+        }
+
+        codes.insert( item->GetNetCode() );
+    }
+
+    return codes;
+}
+
+
+HANDLER_RESULT<RatsnestResponse> API_HANDLER_PCB::handleGetRatsnest( const HANDLER_CONTEXT<GetRatsnest>& aCtx )
+{
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    HANDLER_RESULT<std::set<int>> filter = resolveNets( aCtx.Request.nets() );
+
+    if( !filter )
+        return tl::unexpected( filter.error() );
+
+    BOARD*                             brd = board();
+    std::shared_ptr<CONNECTIVITY_DATA> connectivity = brd->GetConnectivity();
+
+    connectivity->RecalculateRatsnest();
+
+    RatsnestResponse response;
+
+    for( int netcode = 1; netcode < connectivity->GetNetCount(); netcode++ )
+    {
+        if( !filter->empty() && !filter->contains( netcode ) )
+            continue;
+
+        RN_NET*       rn = connectivity->GetRatsnestForNet( netcode );
+        NETINFO_ITEM* net = brd->FindNet( netcode );
+
+        if( !rn || !net )
+            continue;
+
+        for( const CN_EDGE& edge : rn->GetEdges() )
+        {
+            std::shared_ptr<const CN_ANCHOR> source = edge.GetSourceNode();
+            std::shared_ptr<const CN_ANCHOR> target = edge.GetTargetNode();
+
+            if( !source || !target || !source->Parent() || !target->Parent() )
+                continue;
+
+            RatsnestEdge* out = response.add_edges();
+            out->mutable_net()->set_name( net->GetNetname().ToUTF8() );
+            out->mutable_source()->set_value( source->Parent()->m_Uuid.AsStdString() );
+            PackVector2( *out->mutable_source_position(), source->Pos() );
+            out->mutable_target()->set_value( target->Parent()->m_Uuid.AsStdString() );
+            PackVector2( *out->mutable_target_position(), target->Pos() );
+            out->mutable_length()->set_value_nm( KiROUND( ( target->Pos() - source->Pos() ).EuclideanNorm() ) );
+        }
+    }
+
+    response.set_unrouted_count( connectivity->GetUnconnectedCount( false ) );
+    return response;
+}
+
+
+HANDLER_RESULT<UnroutedCountResponse>
+API_HANDLER_PCB::handleGetUnroutedCount( const HANDLER_CONTEXT<GetUnroutedCount>& aCtx )
+{
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    std::shared_ptr<CONNECTIVITY_DATA> connectivity = board()->GetConnectivity();
+
+    connectivity->RecalculateRatsnest();
+
+    UnroutedCountResponse response;
+    uint32_t              nets = 0;
+
+    for( int netcode = 1; netcode < connectivity->GetNetCount(); netcode++ )
+    {
+        RN_NET* rn = connectivity->GetRatsnestForNet( netcode );
+
+        if( rn && !rn->GetEdges().empty() )
+            nets++;
+    }
+
+    response.set_unrouted_count( connectivity->GetUnconnectedCount( false ) );
+    response.set_unrouted_net_count( nets );
+    return response;
+}
+
+
+HANDLER_RESULT<NetLengthsResponse> API_HANDLER_PCB::handleGetNetLengths( const HANDLER_CONTEXT<GetNetLengths>& aCtx )
+{
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    HANDLER_RESULT<std::set<int>> filter = resolveNets( aCtx.Request.nets() );
+
+    if( !filter )
+        return tl::unexpected( filter.error() );
+
+    BOARD*                             brd = board();
+    std::shared_ptr<CONNECTIVITY_DATA> connectivity = brd->GetConnectivity();
+    LENGTH_DELAY_CALCULATION*          calc = brd->GetLengthCalculation();
+
+    if( !calc )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_UNKNOWN );
+        e.set_error_message( "the board has no length calculation engine" );
+        return tl::unexpected( e );
+    }
+
+    connectivity->RecalculateRatsnest();
+
+    // The copper items per net, as the net inspector collects them
+    std::map<int, std::vector<LENGTH_DELAY_CALCULATION_ITEM>> itemsByNet;
+
+    for( int netcode : *filter )
+        itemsByNet[netcode];
+
+    for( CN_ITEM* cnItem : connectivity->GetConnectivityAlgo()->ItemList() )
+    {
+        if( !cnItem->Valid() || !cnItem->Parent() )
+            continue;
+
+        int netcode = cnItem->Net();
+
+        if( netcode <= 0 || ( !filter->empty() && !filter->contains( netcode ) ) )
+            continue;
+
+        switch( cnItem->Parent()->Type() )
+        {
+        case PCB_TRACE_T:
+        case PCB_ARC_T:
+        case PCB_VIA_T:
+        case PCB_PAD_T:
+            itemsByNet[netcode].emplace_back( calc->GetLengthCalculationItem( cnItem->Parent() ) );
+            break;
+
+        default:
+            break;
+        }
+    }
+
+    constexpr PATH_OPTIMISATIONS opts = { .OptimiseVias = true,
+                                          .MergeTracks = true,
+                                          .OptimiseTracesInPads = true,
+                                          .InferViaInPad = false };
+
+    const LENGTH_DELAY_DOMAIN_OPT domain = aCtx.Request.with_delays() ? LENGTH_DELAY_DOMAIN_OPT::WITH_DELAY_DETAIL
+                                                                      : LENGTH_DELAY_DOMAIN_OPT::NO_DELAY_DETAIL;
+
+    NetLengthsResponse response;
+
+    for( auto& [netcode, items] : itemsByNet )
+    {
+        NETINFO_ITEM* net = brd->FindNet( netcode );
+
+        if( !net )
+            continue;
+
+        LENGTH_DELAY_STATS stats = calc->CalculateLengthDetails( items, opts, nullptr, nullptr,
+                                                                 LENGTH_DELAY_LAYER_OPT::WITH_LAYER_DETAIL, domain );
+
+        // Nets without pads are listed only when asked for by name, as the inspector does
+        if( filter->empty() && stats.NumPads == 0 )
+            continue;
+
+        NetLength* out = response.add_lengths();
+        out->mutable_net()->set_name( net->GetNetname().ToUTF8() );
+        out->set_pad_count( stats.NumPads );
+        out->set_via_count( stats.NumVias );
+        out->mutable_track_length()->set_value_nm( stats.TrackLength );
+        out->mutable_via_length()->set_value_nm( stats.ViaLength );
+        out->mutable_pad_to_die_length()->set_value_nm( stats.PadToDieLength );
+        out->mutable_total_length()->set_value_nm( stats.TotalLength() );
+
+        if( RN_NET* rn = connectivity->GetRatsnestForNet( netcode ) )
+            out->mutable_unrouted_length()->set_value_nm( rn->GetTotalAirlineLength() );
+
+        if( stats.LayerLengths )
+        {
+            for( const auto& [layer, length] : *stats.LayerLengths )
+            {
+                NetLayerLength* layerLength = out->add_layer_lengths();
+                layerLength->set_layer( ToProtoEnum<PCB_LAYER_ID, board::types::BoardLayer>( layer ) );
+                layerLength->mutable_length()->set_value_nm( length );
+            }
+        }
+
+        if( aCtx.Request.with_delays() )
+            out->set_total_delay_ps( stats.TotalDelay() );
+    }
+
+    return response;
+}
+
+
+//// Footprint updates (Since 11.0) ////
+
+HANDLER_RESULT<UpdateFootprintsFromLibraryResponse>
+API_HANDLER_PCB::handleUpdateFootprintsFromLibrary( const HANDLER_CONTEXT<UpdateFootprintsFromLibrary>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    const UpdateFootprintsFromLibrary& req = aCtx.Request;
+    BOARD*                             brd = board();
+    std::vector<FOOTPRINT*>            targets;
+
+    for( const types::KIID& id : req.footprints() )
+    {
+        std::optional<BOARD_ITEM*> item = getItemById( KIID( id.value() ) );
+
+        if( !item || ( *item )->Type() != PCB_FOOTPRINT_T )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( fmt::format( "footprint with ID {} not found on the board", id.value() ) );
+            return tl::unexpected( e );
+        }
+
+        targets.push_back( static_cast<FOOTPRINT*>( *item ) );
+    }
+
+    if( req.footprints().empty() )
+        targets.assign( brd->Footprints().begin(), brd->Footprints().end() );
+
+    std::optional<LIB_ID> newId;
+
+    if( req.has_new_footprint() )
+    {
+        newId = LIB_ID( wxString::FromUTF8( req.new_footprint().library_nickname() ),
+                        wxString::FromUTF8( req.new_footprint().entry_name() ) );
+
+        if( !newId->IsValid() )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( "new_footprint needs a library nickname and an entry name" );
+            return tl::unexpected( e );
+        }
+    }
+
+    // Library footprints come from the project's tables, so make sure they are loaded
+    FOOTPRINT_LIBRARY_ADAPTER* adapter = PROJECT_PCB::FootprintLibAdapter( &project() );
+    adapter->AsyncLoad();
+    adapter->BlockUntilLoaded();
+
+    auto option =
+            []( bool aHas, bool aValue, bool aDefault )
+            {
+                return aHas ? aValue : aDefault;
+            };
+
+    const bool deleteExtraTexts = option( req.has_delete_extra_texts(), req.delete_extra_texts(), true );
+    const bool resetTextLayers = option( req.has_reset_text_layers(), req.reset_text_layers(), true );
+    const bool resetTextEffects = option( req.has_reset_text_effects(), req.reset_text_effects(), true );
+    const bool resetTextPositions = option( req.has_reset_text_positions(), req.reset_text_positions(), true );
+    const bool resetTextContent = option( req.has_reset_text_content(), req.reset_text_content(), true );
+    const bool resetFabAttrs = option( req.has_reset_fabrication_attributes(), req.reset_fabrication_attributes(),
+                                       true );
+    const bool resetClearances = option( req.has_reset_clearance_overrides(), req.reset_clearance_overrides(), true );
+    const bool reset3DModels = option( req.has_reset_3d_models(), req.reset_3d_models(), true );
+
+    BOARD_COMMIT*                       commit = static_cast<BOARD_COMMIT*>( getCurrentCommit( aCtx.ClientName ) );
+    UpdateFootprintsFromLibraryResponse response;
+
+    for( FOOTPRINT* footprint : targets )
+    {
+        LIB_ID     id = newId.value_or( footprint->GetFPID() );
+        wxString   reference = footprint->GetReference();
+        FOOTPRINT* libFootprint = nullptr;
+
+        try
+        {
+            libFootprint = adapter->LoadFootprint( id, false );
+        }
+        catch( const IO_ERROR& )
+        {
+            libFootprint = nullptr;
+        }
+
+        if( !libFootprint )
+        {
+            response.add_missing( reference.ToUTF8() );
+            response.add_messages( fmt::format( "{} ({}): library footprint not found", reference.ToUTF8().data(),
+                                                id.Format().c_str() ) );
+            continue;
+        }
+
+        bool updated = !req.only_changed() || footprint->FootprintNeedsUpdate( libFootprint );
+        bool shifted = false;
+
+        if( req.only_changed() && !updated && !req.match_pad_positions() )
+        {
+            delete libFootprint;
+            response.set_unchanged_count( response.unchanged_count() + 1 );
+            response.add_messages( fmt::format( "{} ({}): no changes", reference.ToUTF8().data(),
+                                                id.Format().c_str() ) );
+            continue;
+        }
+
+        brd->ExchangeFootprint( footprint, libFootprint, *commit, req.match_pad_positions(), deleteExtraTexts,
+                                resetTextLayers, resetTextEffects, resetTextPositions, resetTextContent,
+                                resetFabAttrs, resetClearances, reset3DModels, req.reset_transform(), &updated,
+                                &shifted );
+
+        if( req.only_changed() && !updated )
+        {
+            response.set_unchanged_count( response.unchanged_count() + 1 );
+            response.add_messages( fmt::format( "{} ({}): {}", reference.ToUTF8().data(), id.Format().c_str(),
+                                                shifted ? "shifted/rotated to match pad positions" : "no changes" ) );
+        }
+        else
+        {
+            response.set_updated_count( response.updated_count() + 1 );
+            response.add_messages( fmt::format( "{} ({}): {}", reference.ToUTF8().data(), id.Format().c_str(),
+                                                newId ? "changed" : "updated" ) );
+        }
+    }
+
+    if( !m_activeClients.contains( aCtx.ClientName ) )
+        pushCurrentCommit( aCtx.ClientName, newId ? _( "Change Footprint" ) : _( "Update Footprint" ) );
+
+    return response;
+}
+
+
+//// Teardrops (Since 11.0) ////
+
+HANDLER_RESULT<SetTeardropsResponse> API_HANDLER_PCB::handleSetTeardrops( const HANDLER_CONTEXT<SetTeardrops>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    const SetTeardrops& req = aCtx.Request;
+    ApiResponseStatus   e;
+    e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+
+    if( req.action() == TDA_UNKNOWN )
+    {
+        e.set_error_message( "action must be TDA_ADD, TDA_REMOVE or TDA_SET" );
+        return tl::unexpected( e );
+    }
+
+    if( req.action() == TDA_SET && !req.has_settings() )
+    {
+        e.set_error_message( "TDA_SET needs settings" );
+        return tl::unexpected( e );
+    }
+
+    HANDLER_RESULT<std::set<int>> filter = resolveNets( req.nets() );
+
+    if( !filter )
+        return tl::unexpected( filter.error() );
+
+    bool vias = req.vias();
+    bool pthPads = req.pth_pads();
+    bool smdPads = req.smd_pads();
+
+    if( req.items().empty() && !vias && !pthPads && !smdPads && !req.track_to_track() )
+        vias = pthPads = smdPads = true;
+
+    BOARD*                    brd = board();
+    BOARD_DESIGN_SETTINGS&    bds = brd->GetDesignSettings();
+    TEARDROP_PARAMETERS_LIST* paramsList = bds.GetTeadropParamsList();
+    BOARD_COMMIT*             commit = static_cast<BOARD_COMMIT*>( getCurrentCommit( aCtx.ClientName ) );
+    SetTeardropsResponse      response;
+
+    brd->SetLegacyTeardrops( false );
+
+    auto apply =
+            [&]( TEARDROP_PARAMETERS& aParams, TARGET_TD aDefaultTarget )
+            {
+                switch( req.action() )
+                {
+                case TDA_REMOVE:
+                    aParams.m_Enabled = false;
+                    break;
+
+                case TDA_ADD:
+                    aParams = *paramsList->GetParameters( aDefaultTarget );
+                    aParams.m_Enabled = true;
+                    break;
+
+                case TDA_SET:
+                    kiapi::board::UnpackTeardropSettings( aParams, req.settings() );
+                    break;
+
+                default:
+                    break;
+                }
+            };
+
+    auto process =
+            [&]( BOARD_CONNECTED_ITEM* aItem, bool aFiltered )
+            {
+                if( aFiltered )
+                {
+                    if( !filter->empty() && !filter->contains( aItem->GetNetCode() ) )
+                        return;
+
+                    if( req.round_shapes_only() && !TEARDROP_MANAGER::IsUniformlyRound( aItem ) )
+                        return;
+                }
+
+                commit->Modify( aItem );
+                apply( aItem->GetTeardropParams(),
+                       TEARDROP_MANAGER::IsUniformlyRound( aItem ) ? TARGET_ROUND : TARGET_RECT );
+                response.set_item_count( response.item_count() + 1 );
+            };
+
+    if( !req.items().empty() )
+    {
+        for( const types::KIID& id : req.items() )
+        {
+            std::optional<BOARD_ITEM*> item = getItemById( KIID( id.value() ) );
+
+            if( !item || ( ( *item )->Type() != PCB_PAD_T && ( *item )->Type() != PCB_VIA_T ) )
+            {
+                e.set_error_message( fmt::format( "item {} is not a pad or via on the board", id.value() ) );
+                return tl::unexpected( e );
+            }
+
+            process( static_cast<BOARD_CONNECTED_ITEM*>( *item ), true );
+        }
+    }
+    else
+    {
+        if( vias )
+        {
+            for( PCB_TRACK* track : brd->Tracks() )
+            {
+                if( track->Type() == PCB_VIA_T )
+                    process( track, true );
+            }
+        }
+
+        for( FOOTPRINT* footprint : brd->Footprints() )
+        {
+            for( PAD* pad : footprint->Pads() )
+            {
+                if( pthPads && pad->GetAttribute() == PAD_ATTRIB::PTH )
+                    process( pad, true );
+                else if( smdPads && ( pad->GetAttribute() == PAD_ATTRIB::SMD || pad->GetAttribute() == PAD_ATTRIB::CONN ) )
+                    process( pad, true );
+            }
+        }
+    }
+
+    if( req.track_to_track() )
+    {
+        TEARDROP_PARAMETERS* trackParams = paramsList->GetParameters( TARGET_TRACK );
+        TEARDROP_MANAGER     manager( brd, toolManager() );
+
+        manager.DeleteTrackToTrackTeardrops( *commit );
+        apply( *trackParams, TARGET_TRACK );
+
+        if( trackParams->m_Enabled )
+        {
+            manager.BuildTrackCaches();
+            manager.AddTeardropsOnTracks( *commit, nullptr, true );
+        }
+    }
+
+    // The commit regenerates the teardrops of the pads and vias it modifies
+    if( !m_activeClients.contains( aCtx.ClientName ) )
+        pushCurrentCommit( aCtx.ClientName, _( "Edit Teardrops" ) );
+
+    return response;
+}
+
+
+HANDLER_RESULT<SetTeardropsResponse>
+API_HANDLER_PCB::handleRemoveTeardrops( const HANDLER_CONTEXT<RemoveTeardrops>& aCtx )
+{
+    HANDLER_CONTEXT<SetTeardrops> ctx;
+    ctx.ClientName = aCtx.ClientName;
+    *ctx.Request.mutable_board() = aCtx.Request.board();
+    ctx.Request.set_action( TDA_REMOVE );
+    ctx.Request.set_vias( true );
+    ctx.Request.set_pth_pads( true );
+    ctx.Request.set_smd_pads( true );
+    ctx.Request.set_track_to_track( true );
+
+    return handleSetTeardrops( ctx );
+}
+
+
+//// Autoplacement (Since 11.0) ////
+
+HANDLER_RESULT<AutoplaceFootprintsResponse>
+API_HANDLER_PCB::handleAutoplaceFootprints( const HANDLER_CONTEXT<AutoplaceFootprints>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    // The placer reverts its commit on failure, so it gets one of its own rather than a client's
+    if( m_activeClients.contains( aCtx.ClientName ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BUSY );
+        e.set_error_message( "AutoplaceFootprints cannot run inside a client commit; call EndCommit first" );
+        return tl::unexpected( e );
+    }
+
+    BOARD*                  brd = board();
+    std::vector<FOOTPRINT*> footprints;
+
+    for( const types::KIID& id : aCtx.Request.footprints() )
+    {
+        std::optional<BOARD_ITEM*> item = getItemById( KIID( id.value() ) );
+
+        if( !item || ( *item )->Type() != PCB_FOOTPRINT_T )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( fmt::format( "footprint with ID {} not found on the board", id.value() ) );
+            return tl::unexpected( e );
+        }
+
+        footprints.push_back( static_cast<FOOTPRINT*>( *item ) );
+    }
+
+    const bool placeOffboard = footprints.empty() || aCtx.Request.include_offboard();
+
+    std::map<FOOTPRINT*, VECTOR2I> before;
+
+    for( FOOTPRINT* footprint : brd->Footprints() )
+        before[footprint] = footprint->GetPosition();
+
+    std::unique_ptr<COMMIT> owned = createCommit();
+    BOARD_COMMIT*           commit = static_cast<BOARD_COMMIT*>( owned.get() );
+    AR_AUTOPLACER           autoplacer( brd );
+
+    AR_RESULT result = autoplacer.AutoplaceFootprints( footprints, commit, placeOffboard );
+
+    AutoplaceFootprintsResponse response;
+
+    if( result != AR_COMPLETED )
+    {
+        commit->Revert();
+        response.set_result( APR_NO_BOARD_OUTLINE );
+        return response;
+    }
+
+    uint32_t placed = 0;
+
+    for( FOOTPRINT* footprint : brd->Footprints() )
+    {
+        if( before.contains( footprint ) && before[footprint] != footprint->GetPosition() )
+            placed++;
+    }
+
+    publishDocumentChanged( aCtx.ClientName, _( "Autoplace Footprints" ), nullptr, commit );
+    commit->Push( _( "Autoplace Footprints" ) );
+
+    if( frame() )
+        frame()->Refresh();
+
+    response.set_result( APR_COMPLETED );
+    response.set_placed_count( placed );
+    return response;
+}
+
+
+//// Global deletion (Since 11.0) ////
+
+HANDLER_RESULT<GlobalDeletionResponse> API_HANDLER_PCB::handleGlobalDeletion( const HANDLER_CONTEXT<GlobalDeletion>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    const GlobalDeletion& req = aCtx.Request;
+    ApiResponseStatus     e;
+    e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+
+    std::vector<KICAD_T> typeList = parseRequestedItemTypes( req.types() );
+
+    if( typeList.empty() )
+    {
+        e.set_error_message( "GlobalDeletion needs at least one valid item type" );
+        return tl::unexpected( e );
+    }
+
+    std::set<KICAD_T> types( typeList.begin(), typeList.end() );
+    LSET              layers;
+
+    for( int layer : req.layers() )
+    {
+        PCB_LAYER_ID id = FromProtoEnum<PCB_LAYER_ID>( static_cast<board::types::BoardLayer>( layer ) );
+
+        if( id == UNDEFINED_LAYER || id == UNSELECTED_LAYER )
+        {
+            e.set_error_message( fmt::format( "layer {} is not a board layer", layer ) );
+            return tl::unexpected( e );
+        }
+
+        layers.set( id );
+    }
+
+    if( req.layers().empty() )
+        layers = LSET().set();
+
+    const LockFilter lock = req.locked() == LF_UNKNOWN ? LF_ALL : req.locked();
+
+    auto matches =
+            [&]( BOARD_ITEM* aItem )
+            {
+                if( lock == LF_LOCKED && !aItem->IsLocked() )
+                    return false;
+
+                if( lock == LF_UNLOCKED && aItem->IsLocked() )
+                    return false;
+
+                return ( aItem->GetLayerSet() & layers ).any();
+            };
+
+    BOARD*                 brd = board();
+    BOARD_COMMIT*          commit = static_cast<BOARD_COMMIT*>( getCurrentCommit( aCtx.ClientName ) );
+    GlobalDeletionResponse response;
+
+    auto remove =
+            [&]( BOARD_ITEM* aItem )
+            {
+                commit->Remove( aItem );
+                response.set_deleted_count( response.deleted_count() + 1 );
+            };
+
+    if( types.contains( PCB_ZONE_T ) )
+    {
+        for( ZONE* zone : brd->Zones() )
+        {
+            if( zone->IsTeardropArea() && !req.teardrops() )
+                continue;
+
+            if( matches( zone ) )
+                remove( zone );
+        }
+    }
+
+    for( BOARD_ITEM* item : brd->Drawings() )
+    {
+        if( !types.contains( item->Type() ) )
+            continue;
+
+        if( item->Type() == PCB_SHAPE_T && item->GetLayer() == Edge_Cuts && !req.board_edges() )
+            continue;
+
+        if( matches( item ) )
+            remove( item );
+    }
+
+    if( types.contains( PCB_FOOTPRINT_T ) )
+    {
+        for( FOOTPRINT* footprint : brd->Footprints() )
+        {
+            if( matches( footprint ) )
+                remove( footprint );
+        }
+    }
+
+    const bool anyTrackType = types.contains( PCB_TRACE_T ) || types.contains( PCB_ARC_T ) || types.contains( PCB_VIA_T );
+
+    if( anyTrackType )
+    {
+        for( PCB_TRACK* track : brd->Tracks() )
+        {
+            if( types.contains( track->Type() ) && matches( track ) )
+                remove( track );
+        }
+
+        // Tuning patterns that already lost their tracks go with them, as the dialog does
+        for( PCB_GENERATOR* generator : brd->Generators() )
+        {
+            if( PCB_TUNING_PATTERN* pattern = dynamic_cast<PCB_TUNING_PATTERN*>( generator ) )
+            {
+                if( pattern->GetBoardItems().empty() )
+                    remove( pattern );
+            }
+        }
+    }
+
+    if( types.contains( PCB_GROUP_T ) )
+    {
+        for( PCB_GROUP* group : brd->Groups() )
+        {
+            if( lock == LF_ALL || ( lock == LF_LOCKED ) == group->IsLocked() )
+                remove( group );
+        }
+    }
+
+    if( !m_activeClients.contains( aCtx.ClientName ) )
+        pushCurrentCommit( aCtx.ClientName, _( "Global Delete" ) );
+
+    if( types.contains( PCB_MARKER_T ) )
+    {
+        response.set_deleted_count( response.deleted_count() + static_cast<uint32_t>( brd->Markers().size() ) );
+        brd->DeleteMARKERs();
+        bumpRevision();
+    }
+
+    if( frame() )
+        frame()->Refresh();
 
     return response;
 }

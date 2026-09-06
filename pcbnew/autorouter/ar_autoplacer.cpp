@@ -719,6 +719,10 @@ FOOTPRINT* AR_AUTOPLACER::pickFootprint()
 
 void AR_AUTOPLACER::drawPlacementRoutingMatrix( )
 {
+    // No overlay when placing without a view (the API)
+    if( !m_overlay )
+        return;
+
     // Draw the board free area
     m_overlay->Clear();
     m_overlay->SetIsFill( true );
