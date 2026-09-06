@@ -175,20 +175,112 @@ wxFileName KICAD_API_SERVER::EventsSocketPathFor( const wxFileName& aSocketPath 
 }
 
 
+std::string KICAD_API_SERVER::EventsUrlFor( const std::string& aRequestUrl )
+{
+    size_t schemeEnd = aRequestUrl.find( "://" );
+
+    if( schemeEnd == std::string::npos )
+        return "";
+
+    std::string scheme = aRequestUrl.substr( 0, schemeEnd );
+    std::string rest = aRequestUrl.substr( schemeEnd + 3 );
+
+    if( scheme == "ipc" )
+    {
+        wxFileName path( wxString::FromUTF8( rest ) );
+        return fmt::format( "ipc://{}", EventsSocketPathFor( path ).GetFullPath().ToUTF8().data() );
+    }
+
+    if( scheme == "tcp" || scheme == "tcp4" || scheme == "tcp6" )
+    {
+        // host:port, where the host may be a bracketed IPv6 address
+        size_t colon = rest.rfind( ':' );
+
+        if( colon == std::string::npos || colon + 1 >= rest.size() )
+            return "";
+
+        int port = 0;
+
+        try
+        {
+            port = std::stoi( rest.substr( colon + 1 ) );
+        }
+        catch( const std::exception& )
+        {
+            return "";
+        }
+
+        return fmt::format( "{}://{}:{}", scheme, rest.substr( 0, colon ), port + 1 );
+    }
+
+    if( scheme == "ws" || scheme == "wss" )
+    {
+        // Strip a trailing slash so that the events path is "<path>/events"
+        while( !rest.empty() && rest.back() == '/' )
+            rest.pop_back();
+
+        return fmt::format( "{}://{}/events", scheme, rest );
+    }
+
+    if( scheme == "inproc" )
+        return fmt::format( "inproc://{}-events", rest );
+
+    return "";
+}
+
+
 void KICAD_API_SERVER::Start()
 {
     if( Running() )
         return;
 
-    wxFileName socket;
+    wxFileName  socket;
+    std::string requestUrl;
+    std::string eventsUrl;
+    wxString    override = m_socketPathOverride;
 
-    if( m_socketPathOverride.IsEmpty() )
+    // An ipc:// URL is the socket path in URL clothing; other URLs skip the file handling below
+    if( override.StartsWith( wxS( "ipc://" ) ) )
+        override = override.Mid( 6 );
+
+    if( override.Contains( wxS( "://" ) ) )
+    {
+        requestUrl = override.ToStdString();
+        eventsUrl = m_publishEvents ? EventsUrlFor( requestUrl ) : "";
+
+        m_server = std::make_unique<KINNG_REQUEST_SERVER>( requestUrl );
+        m_server->SetCallback( [&]( std::string* aRequest ) { onApiRequest( aRequest ); } );
+
+        if( !m_server->Start() )
+        {
+            wxLogTrace( traceApi, "Server: failed to start KINNG listener thread" );
+            m_server.reset( nullptr );
+            return;
+        }
+
+        if( !eventsUrl.empty() )
+        {
+            m_publisher = std::make_unique<KINNG_PUBLISHER>( eventsUrl );
+
+            if( !m_publisher->Start() )
+            {
+                wxLogTrace( traceApi, "Server: failed to start events publisher" );
+                m_publisher.reset( nullptr );
+            }
+        }
+
+        wxLogTrace( traceApi, wxString::Format( "Server: listening at %s", SocketPath() ) );
+        Bind( API_REQUEST_EVENT, &KICAD_API_SERVER::handleApiEvent, this );
+        return;
+    }
+
+    if( override.IsEmpty() )
     {
         socket = StandardSocketPath();
     }
     else
     {
-        socket.Assign( m_socketPathOverride );
+        socket.Assign( override );
 
         if( !socket.IsAbsolute() )
             socket.MakeAbsolute();
@@ -251,13 +343,16 @@ void KICAD_API_SERVER::Start()
     if( eventsSocket.Exists() )
         wxRemoveFile( eventsSocket.GetFullPath() );
 
-    m_publisher = std::make_unique<KINNG_PUBLISHER>(
-            fmt::format( "ipc://{}", eventsSocket.GetFullPath().ToStdString() ) );
-
-    if( !m_publisher->Start() )
+    if( m_publishEvents )
     {
-        wxLogTrace( traceApi, "Server: failed to start events publisher" );
-        m_publisher.reset( nullptr );
+        m_publisher = std::make_unique<KINNG_PUBLISHER>(
+                fmt::format( "ipc://{}", eventsSocket.GetFullPath().ToStdString() ) );
+
+        if( !m_publisher->Start() )
+        {
+            wxLogTrace( traceApi, "Server: failed to start events publisher" );
+            m_publisher.reset( nullptr );
+        }
     }
 
     m_logFilePath.AssignDir( PATHS::GetLogsPath() );

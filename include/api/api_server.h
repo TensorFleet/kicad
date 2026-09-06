@@ -128,10 +128,32 @@ public:
         m_readyToReply.store( aReady, std::memory_order_release );
     }
 
+    /**
+     * Listen somewhere other than the standard socket.  Accepts a socket file path or an nng URL
+     * (ipc://path, tcp://host:port, ws://host:port/path, inproc://name).  Must be called before
+     * Start().  Since 11.0: URLs.
+     */
     void SetSocketPath( const wxString& aSocketPath )
     {
         m_socketPathOverride = aSocketPath;
     }
+
+    /// Use a known token instead of a random one.  Must be called before Start().  Since 11.0
+    void SetToken( const std::string& aToken )
+    {
+        if( !aToken.empty() )
+            m_token = aToken;
+    }
+
+    /// Whether to open the events socket at all.  Must be called before Start().  Since 11.0
+    void SetPublishEvents( bool aPublish ) { m_publishEvents = aPublish; }
+
+    /**
+     * Derive the events URL from a request URL: an ipc:// sibling file (see EventsSocketPathFor),
+     * the next port for tcp://, "/events" appended to the path for ws:// and wss://, and a
+     * "-events" suffix for inproc://.  @return an empty string for other schemes.  Since 11.0
+     */
+    static std::string EventsUrlFor( const std::string& aRequestUrl );
 
     std::string SocketPath() const;
 
@@ -205,6 +227,8 @@ private:
     bool m_requestPending;
 
     wxString m_socketPathOverride;
+
+    bool m_publishEvents = true;
 
     static wxString s_logFileName;
 

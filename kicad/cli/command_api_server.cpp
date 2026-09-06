@@ -48,6 +48,8 @@
 
 #define ARG_PATH "path"
 #define ARG_SOCKET "--socket"
+#define ARG_TOKEN "--token"
+#define ARG_NO_EVENTS "--no-events"
 
 
 std::atomic_bool g_apiServerExitRequested{ false };
@@ -71,8 +73,18 @@ CLI::API_SERVER_COMMAND::API_SERVER_COMMAND() :
 
     m_argParser.add_argument( ARG_SOCKET )
             .default_value( std::string() )
-            .help( UTF8STDSTR( _( "Override API socket path" ) ) )
-            .metavar( "SOCKET_PATH" );
+            .help( UTF8STDSTR( _( "Listen at this socket path or nng URL (ipc://path, tcp://host:port, "
+                                  "ws://host:port/path) instead of the default socket" ) ) )
+            .metavar( "SOCKET_PATH_OR_URL" );
+
+    m_argParser.add_argument( ARG_TOKEN )
+            .default_value( std::string() )
+            .help( UTF8STDSTR( _( "Use this API token instead of a random one" ) ) )
+            .metavar( "TOKEN" );
+
+    m_argParser.add_argument( ARG_NO_EVENTS )
+            .help( UTF8STDSTR( _( "Do not open the events socket" ) ) )
+            .flag();
 }
 
 
@@ -87,6 +99,9 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
 
     if( !socketPath.IsEmpty() )
         server->SetSocketPath( socketPath );
+
+    server->SetToken( m_argParser.get<std::string>( ARG_TOKEN ) );
+    server->SetPublishEvents( !m_argParser.get<bool>( ARG_NO_EVENTS ) );
 
     // Eventually we might support opening multiple projects at once, but for now
     // we support one project at a time, but multiple documents within that project
@@ -987,6 +1002,10 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
 
     if( !eventsPath.IsEmpty() )
         wxFprintf( stdout, "KiCad API events published at %s\n", eventsPath );
+    else
+        wxFprintf( stdout, "KiCad API events not published\n" );
+
+    fflush( stdout );
 
     auto oldSigInt = std::signal( SIGINT, apiServerSignalHandler );
 #ifdef SIGTERM
