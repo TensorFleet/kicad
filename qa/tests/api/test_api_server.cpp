@@ -40,6 +40,7 @@
 #include <api/common/envelope.pb.h>
 
 #include <board.h>
+#include <ki_exception.h>
 #include <settings/settings_manager.h>
 
 
@@ -276,6 +277,48 @@ BOOST_AUTO_TEST_CASE( GetOpenDocumentsAnswersEmptyWithoutEditor )
 
     m_server.DeregisterHandler( &pcbHandler );
     m_server.DeregisterHandler( &m_commonHandler );
+}
+
+
+namespace
+{
+
+/// A handler whose Ping throws, as a job that fails to load a kiface would
+class THROWING_HANDLER : public API_HANDLER
+{
+public:
+    THROWING_HANDLER() : API_HANDLER()
+    {
+        registerHandler<kiapi::common::commands::Ping, google::protobuf::Empty>( &THROWING_HANDLER::handlePing );
+    }
+
+private:
+    HANDLER_RESULT<google::protobuf::Empty> handlePing( const HANDLER_CONTEXT<kiapi::common::commands::Ping>& )
+    {
+        THROW_IO_ERROR( wxS( "kiface missing" ) );
+    }
+};
+
+} // namespace
+
+
+// Since 11.0: an exception escaping a handler is reported to the client instead of leaving the
+// request unanswered (which would block the request/reply socket for every later request)
+BOOST_AUTO_TEST_CASE( DispatchReportsHandlerExceptions )
+{
+    THROWING_HANDLER throwing;
+    m_server.RegisterHandler( &throwing );
+
+    kiapi::common::ApiRequest request;
+    request.mutable_header()->set_client_name( "kicad.qa" );
+    request.mutable_message()->PackFrom( kiapi::common::commands::Ping() );
+
+    API_RESULT result = m_server.Dispatch( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_BAD_REQUEST );
+    BOOST_CHECK( result.error().error_message().find( "kiface missing" ) != std::string::npos );
+
+    m_server.DeregisterHandler( &throwing );
 }
 
 
