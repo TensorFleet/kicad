@@ -29,6 +29,7 @@
 #include <pin_map.h>
 
 class EDA_ITEM;
+class LIB_SYMBOL;
 class SCH_SYMBOL;
 class SCH_SHEET;
 class SCH_SHEET_PATH;
@@ -38,6 +39,13 @@ std::unique_ptr<EDA_ITEM> CreateItemForType( KICAD_T aType, EDA_ITEM* aContainer
 
 bool PackSymbol( kiapi::schematic::types::SchematicSymbolInstance* aOutput, const SCH_SYMBOL* aInput,
                  const SCH_SHEET_PATH& aPath );
+
+/**
+ * Pack a library symbol definition, including its pins, into a SchematicSymbol message.  This is
+ * the library view of the symbol (as served by a DOCTYPE_SYMBOL document); the instance-specific
+ * view is produced by PackSymbol.
+ */
+void PackLibSymbol( kiapi::schematic::types::SchematicSymbol* aOutput, const LIB_SYMBOL* aInput );
 
 /**
  * Unpack the geometry, the library definition, fields, and the default-variant attributes that

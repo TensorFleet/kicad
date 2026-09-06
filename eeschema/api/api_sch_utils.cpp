@@ -553,3 +553,63 @@ tl::expected<bool, ApiResponseStatus> UnpackSheet( SCH_SHEET* aOutput, const kia
 
     return true;
 }
+
+
+void PackLibSymbol( kiapi::schematic::types::SchematicSymbol* aOutput, const LIB_SYMBOL* aInput )
+{
+    using namespace kiapi::schematic::types;
+
+    wxCHECK( aOutput && aInput, /* void */ );
+
+    PackLibId( aOutput->mutable_id(), aInput->GetLibId() );
+
+    aInput->GetField( FIELD_T::REFERENCE )->Serialize( *aOutput->mutable_reference_field(), schIUScale );
+    aInput->GetField( FIELD_T::VALUE )->Serialize( *aOutput->mutable_value_field(), schIUScale );
+    aInput->GetField( FIELD_T::FOOTPRINT )->Serialize( *aOutput->mutable_footprint_field(), schIUScale );
+    aInput->GetField( FIELD_T::DATASHEET )->Serialize( *aOutput->mutable_datasheet_field(), schIUScale );
+    aInput->GetField( FIELD_T::DESCRIPTION )->Serialize( *aOutput->mutable_description_field(), schIUScale );
+
+    // Unlike the instance view, the library view carries the pins as children
+    for( const SCH_ITEM& drawItem : aInput->GetDrawItems() )
+    {
+        if( drawItem.Type() == SCH_FIELD_T && static_cast<const SCH_FIELD&>( drawItem ).IsMandatory() )
+            continue;
+
+        SchematicSymbolChild* item = aOutput->add_items();
+        item->mutable_unit()->set_unit( drawItem.GetUnit() );
+        item->mutable_body_style()->set_style( drawItem.GetBodyStyle() );
+        item->set_is_private( drawItem.IsPrivate() );
+        drawItem.Serialize( *item->mutable_item() );
+    }
+
+    aOutput->set_unit_count( aInput->GetUnitCount() );
+
+    for( int bodyStyle = BODY_STYLE::BASE; bodyStyle <= aInput->GetBodyStyleCount(); ++bodyStyle )
+        aOutput->add_body_style()->set_name( aInput->GetBodyStyleDescription( bodyStyle, false ).ToUTF8() );
+
+    aOutput->set_keywords( aInput->GetKeyWords().ToUTF8() );
+
+    for( const wxString& filter : aInput->GetFPFilters() )
+        aOutput->add_footprint_filters( filter.ToUTF8() );
+
+    JumperSettings* jumpers = aOutput->mutable_jumpers();
+    jumpers->set_duplicate_names_are_jumpered( aInput->GetDuplicatePinNumbersAreJumpers() );
+
+    for( const std::set<wxString>& group : aInput->JumperPinGroups() )
+    {
+        JumperGroup* jumperGroup = jumpers->add_groups();
+
+        for( const wxString& pinNumber : group )
+            jumperGroup->add_pin_numbers( pinNumber.ToUTF8() );
+    }
+
+    aOutput->set_units_locked( aInput->UnitsLocked() );
+    aOutput->set_embedded_fonts( aInput->GetAreFontsEmbedded() );
+
+    for( const auto& [unit, displayName] : aInput->GetUnitDisplayNames() )
+    {
+        SchematicUnitDisplayName* protoName = aOutput->add_unit_display_names();
+        protoName->set_unit( unit );
+        protoName->set_name( displayName.ToUTF8() );
+    }
+}

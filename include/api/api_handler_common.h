@@ -41,6 +41,12 @@ public:
             const commands::CloseDocument& )>;
     using CLOSE_ALL_DOCUMENTS_HANDLER = std::function<HANDLER_RESULT<Empty>(
             const commands::CloseAllDocuments& )>;
+    using NEW_PROJECT_HANDLER = std::function<HANDLER_RESULT<commands::OpenDocumentResponse>(
+            const commands::NewProject& )>;
+    using NEW_DOCUMENT_HANDLER = std::function<HANDLER_RESULT<commands::OpenDocumentResponse>(
+            const commands::NewDocument& )>;
+    using GET_PROJECT_INFO_HANDLER = std::function<HANDLER_RESULT<commands::ProjectInfoResponse>(
+            const commands::GetProjectInfo& )>;
 
 
     API_HANDLER_COMMON();
@@ -60,6 +66,15 @@ public:
     void SetCloseAllDocumentsHandler( CLOSE_ALL_DOCUMENTS_HANDLER aHandler )
     {
         m_closeAllDocumentsHandler = std::move( aHandler );
+    }
+
+    void SetNewProjectHandler( NEW_PROJECT_HANDLER aHandler ) { m_newProjectHandler = std::move( aHandler ); }
+
+    void SetNewDocumentHandler( NEW_DOCUMENT_HANDLER aHandler ) { m_newDocumentHandler = std::move( aHandler ); }
+
+    void SetGetProjectInfoHandler( GET_PROJECT_INFO_HANDLER aHandler )
+    {
+        m_getProjectInfoHandler = std::move( aHandler );
     }
 
 private:
@@ -107,10 +122,22 @@ private:
     HANDLER_RESULT<Empty> handleCloseAllDocuments(
         const HANDLER_CONTEXT<commands::CloseAllDocuments>& aCtx );
 
+    HANDLER_RESULT<commands::OpenDocumentResponse> handleNewProject(
+        const HANDLER_CONTEXT<commands::NewProject>& aCtx );
+
+    HANDLER_RESULT<commands::OpenDocumentResponse> handleNewDocument(
+        const HANDLER_CONTEXT<commands::NewDocument>& aCtx );
+
+    HANDLER_RESULT<commands::ProjectInfoResponse> handleGetProjectInfo(
+        const HANDLER_CONTEXT<commands::GetProjectInfo>& aCtx );
+
 private:
     OPEN_DOCUMENT_HANDLER m_openDocumentHandler;
     CLOSE_ALL_DOCUMENTS_HANDLER m_closeAllDocumentsHandler;
     CLOSE_DOCUMENT_HANDLER m_closeDocumentHandler;
+    NEW_PROJECT_HANDLER m_newProjectHandler;
+    NEW_DOCUMENT_HANDLER m_newDocumentHandler;
+    GET_PROJECT_INFO_HANDLER m_getProjectInfoHandler;
 };
 
 #endif //KICAD_API_HANDLER_COMMON_H

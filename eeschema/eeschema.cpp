@@ -22,10 +22,12 @@
 #include <algorithm>
 
 #include <api/api_handler_sch.h>
+#include <api/api_handler_symbol.h>
 #include <api/api_server.h>
 #include <api/api_utils.h>
 #include <api/cross_probe_client.h>
 #include <api/headless_sch_context.h>
+#include <api/headless_symbol_context.h>
 #include <core/json_serializers.h>
 #include <pgm_base.h>
 #include <kiface_base.h>
@@ -484,11 +486,17 @@ private:
     std::atomic_bool                       m_libraryPreloadAbort;
 
     void closeCurrentDocument( KICAD_API_SERVER* aServer );
+    void closeCurrentSymbol( KICAD_API_SERVER* aServer );
+
+    bool handleOpenSymbol( const wxString& aProjectPath, const LIB_ID& aLibId, KICAD_API_SERVER* aServer,
+                           wxString* aError );
 
     KIWAY*                                    m_kiway = nullptr;
     SCHEMATIC*                                m_openSchematic = nullptr;
     std::shared_ptr<HEADLESS_SCH_CONTEXT>     m_openContext;
     std::unique_ptr<API_HANDLER_SCH>          m_openHandler;
+    std::shared_ptr<HEADLESS_SYMBOL_CONTEXT>  m_openSymbolContext;
+    std::unique_ptr<API_HANDLER_SYMBOL>       m_openSymbolHandler;
 
 } kiface( "eeschema", KIWAY::FACE_SCH );
 
@@ -883,10 +891,121 @@ void IFACE::closeCurrentDocument( KICAD_API_SERVER* aServer )
 }
 
 
+void IFACE::closeCurrentSymbol( KICAD_API_SERVER* aServer )
+{
+    if( m_openSymbolHandler )
+    {
+        if( aServer )
+            aServer->DeregisterHandler( m_openSymbolHandler.get() );
+
+        m_openSymbolHandler.reset();
+    }
+
+    m_openSymbolContext.reset();
+}
+
+
+bool IFACE::handleOpenSymbol( const wxString& aProjectPath, const LIB_ID& aLibId, KICAD_API_SERVER* aServer,
+                              wxString* aError )
+{
+    if( !aLibId.IsValid() )
+    {
+        if( aError )
+            *aError = wxString::Format( wxS( "Invalid symbol LIB_ID: %s" ), aLibId.GetUniStringLibId() );
+
+        return false;
+    }
+
+    SETTINGS_MANAGER& settingsManager = Pgm().GetSettingsManager();
+    PROJECT*          project = nullptr;
+
+    if( !aProjectPath.IsEmpty() )
+    {
+        wxFileName projectPath( aProjectPath );
+        projectPath.MakeAbsolute();
+
+        project = settingsManager.GetProject( projectPath.GetFullPath() );
+
+        if( !project )
+        {
+            if( !settingsManager.LoadProject( projectPath.GetFullPath(), true ) )
+                wxLogTrace( traceApi, "Warning: no project file found for %s", aProjectPath );
+
+            project = settingsManager.GetProject( projectPath.GetFullPath() );
+        }
+    }
+    else
+    {
+        // No project: global libraries only, through the dummy project
+        project = &settingsManager.Prj();
+    }
+
+    if( !project )
+    {
+        if( aError )
+            *aError = wxString::Format( wxS( "Error loading project for %s" ), aProjectPath );
+
+        return false;
+    }
+
+    std::shared_ptr<HEADLESS_SYMBOL_CONTEXT> newContext;
+
+    try
+    {
+        SYMBOL_LIBRARY_ADAPTER* adapter = PROJECT_SCH::SymbolLibAdapter( project );
+        adapter->AsyncLoad();
+        adapter->BlockUntilLoaded();
+
+        // The adapter keeps ownership of what it returns; the document is an independent copy
+        LIB_SYMBOL* loaded = adapter->LoadSymbol( aLibId );
+
+        if( !loaded )
+        {
+            if( aError )
+                *aError = wxString::Format( wxS( "Symbol not found: %s" ), aLibId.GetUniStringLibId() );
+
+            return false;
+        }
+
+        std::unique_ptr<LIB_SYMBOL> symbol = std::make_unique<LIB_SYMBOL>( *loaded );
+        symbol->SetLibId( aLibId );
+
+        newContext = std::make_shared<HEADLESS_SYMBOL_CONTEXT>( std::move( symbol ), aLibId, project, m_kiway );
+    }
+    catch( const IO_ERROR& ioe )
+    {
+        if( aError )
+            *aError = wxString::Format( wxS( "Failed to load symbol %s: %s" ), aLibId.GetUniStringLibId(),
+                                        ioe.What() );
+
+        return false;
+    }
+    catch( ... )
+    {
+        if( aError )
+            *aError = wxString::Format( wxS( "Failed to load symbol: %s" ), aLibId.GetUniStringLibId() );
+
+        return false;
+    }
+
+    // One symbol at a time; the schematic (if any) stays open
+    closeCurrentSymbol( aServer );
+    m_openSymbolContext = std::move( newContext );
+
+    m_openSymbolHandler = std::make_unique<API_HANDLER_SYMBOL>( m_openSymbolContext );
+    aServer->RegisterHandler( m_openSymbolHandler.get() );
+
+    return true;
+}
+
+
 bool IFACE::HandleApiOpenDocument( const DOCUMENT_SPEC& aSpec,
                                    KICAD_API_SERVER* aServer, wxString* aError )
 {
     wxCHECK( aServer, false );
+
+    if( aSpec.kind == DOCUMENT_SPEC::KIND::FPID_KIND )
+        return handleOpenSymbol( aSpec.path, aSpec.libId, aServer, aError );
 
     if( aSpec.path.IsEmpty() )
     {
@@ -978,7 +1097,7 @@ bool IFACE::HandleApiCloseDocument( const wxString& aSchFileName, KICAD_API_SERV
 {
     wxCHECK( aServer, false );
 
-    if( !m_openContext )
+    if( !m_openContext && !m_openSymbolContext )
     {
         if( aError )
             *aError = wxS( "No document is currently open" );
@@ -986,19 +1105,34 @@ bool IFACE::HandleApiCloseDocument( const wxString& aSchFileName, KICAD_API_SERV
         return false;
     }
 
+    // The name is a schematic file name or a symbol LIB_ID; an empty name closes everything
     if( !aSchFileName.IsEmpty() )
     {
-        wxFileName currentSch( m_openContext->GetCurrentFileName() );
-
-        if( currentSch.GetFullName() != aSchFileName )
+        if( m_openSymbolContext
+            && m_openSymbolContext->GetLoadedLibId().GetUniStringLibId() == aSchFileName )
         {
-            if( aError )
-                *aError = wxS( "Requested document does not match the open document" );
-
-            return false;
+            closeCurrentSymbol( aServer );
+            return true;
         }
+
+        if( m_openContext )
+        {
+            wxFileName currentSch( m_openContext->GetCurrentFileName() );
+
+            if( currentSch.GetFullName() == aSchFileName )
+            {
+                closeCurrentDocument( aServer );
+                return true;
+            }
+        }
+
+        if( aError )
+            *aError = wxS( "Requested document does not match the open document" );
+
+        return false;
     }
 
+    closeCurrentSymbol( aServer );
     closeCurrentDocument( aServer );
     return true;
 }

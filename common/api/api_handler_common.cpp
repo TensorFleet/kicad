@@ -69,6 +69,9 @@ API_HANDLER_COMMON::API_HANDLER_COMMON() :
             &API_HANDLER_COMMON::handleCloseDocument );
     registerHandler<CloseAllDocuments, Empty>(
             &API_HANDLER_COMMON::handleCloseAllDocuments );
+    registerHandler<NewProject, OpenDocumentResponse>( &API_HANDLER_COMMON::handleNewProject );
+    registerHandler<NewDocument, OpenDocumentResponse>( &API_HANDLER_COMMON::handleNewDocument );
+    registerHandler<GetProjectInfo, ProjectInfoResponse>( &API_HANDLER_COMMON::handleGetProjectInfo );
 
 }
 
@@ -408,6 +411,51 @@ HANDLER_RESULT<Empty> API_HANDLER_COMMON::handleSetTextVariables(
     Pgm().GetSettingsManager().SaveProject();
 
     return Empty();
+}
+
+
+HANDLER_RESULT<OpenDocumentResponse> API_HANDLER_COMMON::handleNewProject(
+        const HANDLER_CONTEXT<NewProject>& aCtx )
+{
+    if( !m_newProjectHandler )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_UNIMPLEMENTED );
+        e.set_error_message( "NewProject is not available in this KiCad mode" );
+        return tl::unexpected( e );
+    }
+
+    return m_newProjectHandler( aCtx.Request );
+}
+
+
+HANDLER_RESULT<OpenDocumentResponse> API_HANDLER_COMMON::handleNewDocument(
+        const HANDLER_CONTEXT<NewDocument>& aCtx )
+{
+    if( !m_newDocumentHandler )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_UNIMPLEMENTED );
+        e.set_error_message( "NewDocument is not available in this KiCad mode" );
+        return tl::unexpected( e );
+    }
+
+    return m_newDocumentHandler( aCtx.Request );
+}
+
+
+HANDLER_RESULT<ProjectInfoResponse> API_HANDLER_COMMON::handleGetProjectInfo(
+        const HANDLER_CONTEXT<GetProjectInfo>& aCtx )
+{
+    if( !m_getProjectInfoHandler )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_UNIMPLEMENTED );
+        e.set_error_message( "GetProjectInfo is not available in this KiCad mode" );
+        return tl::unexpected( e );
+    }
+
+    return m_getProjectInfoHandler( aCtx.Request );
 }
 
 
