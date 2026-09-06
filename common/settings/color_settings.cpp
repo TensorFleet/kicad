@@ -333,20 +333,26 @@ COLOR_SETTINGS::COLOR_SETTINGS( const wxString& aFilename, bool aAbsolutePath ) 
                 Set( "board.drc_highlighted", COLOR4D( PUREMAGENTA ) );
                 return true;
             } );
+
+    captureColorKeys();
+}
+
+
+void COLOR_SETTINGS::captureColorKeys()
+{
+    m_colorKeys.clear();
+
+    for( PARAM_BASE* param : m_params )
+    {
+        if( COLOR_MAP_PARAM* colorParam = dynamic_cast<COLOR_MAP_PARAM*>( param ) )
+            m_colorKeys.emplace_back( colorParam->GetJsonPath(), colorParam->GetKey() );
+    }
 }
 
 
 std::vector<std::pair<std::string, int>> COLOR_SETTINGS::GetColorKeys() const
 {
-    std::vector<std::pair<std::string, int>> keys;
-
-    for( PARAM_BASE* param : m_params )
-    {
-        if( COLOR_MAP_PARAM* colorParam = dynamic_cast<COLOR_MAP_PARAM*>( param ) )
-            keys.emplace_back( colorParam->GetJsonPath(), colorParam->GetKey() );
-    }
-
-    return keys;
+    return m_colorKeys;
 }
 
 
@@ -374,6 +380,7 @@ void COLOR_SETTINGS::initFromOther( const COLOR_SETTINGS& aOther )
     m_colors                = aOther.m_colors;
     m_defaultColors         = aOther.m_defaultColors;
     m_writeFile             = aOther.m_writeFile;
+    m_colorKeys             = aOther.m_colorKeys;
 
     // Ensure default colors are present
     for( PARAM_BASE* param : aOther.m_params )

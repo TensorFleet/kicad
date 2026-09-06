@@ -22,6 +22,9 @@
  * GetGraphicsDefaults, SetGraphicsDefaults).  Since 11.0.
  */
 
+#include <map>
+#include <string>
+
 #include <boost/test/unit_test.hpp>
 #include <wx/filefn.h>
 #include <wx/filename.h>
@@ -179,6 +182,71 @@ BOOST_FIXTURE_TEST_CASE( SettingsColorThemes, API_SERVER_E2E_FIXTURE )
 
     request.set_name( "no such theme" );
     BOOST_CHECK_EQUAL( SendStatus( Client(), request ), kiapi::common::AS_BAD_REQUEST );
+}
+
+
+/// Every built-in theme, not just "KiCad Default", enumerates its colors: the Classic theme
+/// clears its parameters to disable load and store, which used to leave GetColorKeys empty.
+BOOST_FIXTURE_TEST_CASE( SettingsBuiltinThemeColors, API_SERVER_E2E_FIXTURE )
+{
+    BOOST_REQUIRE_MESSAGE( Start(), LastError() );
+
+    wxString error;
+
+    ColorThemesResponse themes;
+    BOOST_REQUIRE_MESSAGE( Send( Client(), ListColorThemes(), &themes, &error ), error );
+
+    std::map<std::string, std::map<std::string, int>> keysByTheme;
+
+    for( const ColorThemeInfo& info : themes.themes() )
+    {
+        if( !info.read_only() )
+            continue;
+
+        GetColorTheme request;
+        request.set_name( info.name() );
+
+        ColorThemeResponse theme;
+        BOOST_REQUIRE_MESSAGE( Send( Client(), request, &theme, &error ), error );
+        BOOST_CHECK_MESSAGE( theme.colors_size() > 100,
+                             info.name() + " returned " + std::to_string( theme.colors_size() )
+                                     + " colors" );
+
+        std::map<std::string, int>& keys = keysByTheme[info.name()];
+
+        for( const ColorThemeEntry& entry : theme.colors() )
+        {
+            BOOST_CHECK( !entry.key().empty() );
+            keys[entry.key()] = entry.layer();
+        }
+    }
+
+    BOOST_REQUIRE( keysByTheme.count( "KiCad Default" ) );
+    BOOST_REQUIRE( keysByTheme.count( "KiCad Classic" ) );
+
+    // Both themes describe the same layers, so a client can switch between them
+    BOOST_CHECK( keysByTheme["KiCad Default"] == keysByTheme["KiCad Classic"] );
+
+    // And the Classic theme really carries its own colors
+    GetColorTheme request;
+    request.set_name( "KiCad Classic" );
+
+    ColorThemeResponse classic;
+    BOOST_REQUIRE_MESSAGE( Send( Client(), request, &classic, &error ), error );
+
+    bool sawClassicCopper = false;
+
+    for( const ColorThemeEntry& entry : classic.colors() )
+    {
+        if( entry.key() == "board.copper.f" )
+        {
+            sawClassicCopper = true;
+            BOOST_CHECK_EQUAL( entry.layer(), static_cast<int>( F_Cu ) );
+            BOOST_CHECK( entry.color().a() > 0.0 );
+        }
+    }
+
+    BOOST_CHECK( sawClassicCopper );
 }
 
 
