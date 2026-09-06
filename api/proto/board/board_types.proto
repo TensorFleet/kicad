@@ -1210,6 +1210,15 @@ message Dimension
 
   // Since: 11.0
   repeated kiapi.common.types.CustomProperty custom_properties = 25;
+
+  // The string KiCad actually plots for this dimension: the measurement (or override_text) with
+  // the units appended according to unit_format, wrapped in prefix and suffix, and with any text
+  // variables resolved.  text.text carries only the bare measurement, and the rules that compose
+  // the rest of it are internal to KiCad, so they are applied here instead.  Read-only: KiCad
+  // fills this in when it serializes a dimension and ignores it when deserializing, because the
+  // string follows from the measurement and the fields above.
+  // Since: 11.0
+  string resolved_text = 26;
 }
 
 message ReferenceImage

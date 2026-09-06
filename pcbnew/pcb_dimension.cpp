@@ -375,6 +375,11 @@ void PCB_DIMENSION_BASE::Serialize( google::protobuf::Any &aContainer ) const
     dimension.set_keep_text_aligned( m_keepTextAligned );
 
     kiapi::common::PackCustomProperties( dimension.mutable_custom_properties(), *this );
+
+    // text.text above is the bare measurement; the rules that wrap it in prefix, units and suffix
+    // are internal to KiCad, so hand out the string the plotter draws as well
+    dimension.set_resolved_text( GetShownText( true ).ToUTF8() );
+
     aContainer.PackFrom( dimension );
 }
 
