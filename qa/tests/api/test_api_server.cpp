@@ -21,6 +21,7 @@
  * Tests for KICAD_API_SERVER behaviour that does not need a socket: command discovery.
  */
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <string>
@@ -189,6 +190,18 @@ BOOST_AUTO_TEST_CASE( GetSupportedCommandsIsServedThroughHandlers )
     BOOST_REQUIRE( commands.contains( discovery ) );
 
     m_server.DeregisterHandler( &m_commonHandler );
+}
+
+
+// Without a request the wait times out; nothing else can signal it in a socket-less server
+BOOST_AUTO_TEST_CASE( WaitForRequestTimesOutWhenIdle )
+{
+    auto start = std::chrono::steady_clock::now();
+
+    BOOST_CHECK( !m_server.WaitForRequest( std::chrono::milliseconds( 20 ) ) );
+
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    BOOST_CHECK( elapsed >= std::chrono::milliseconds( 20 ) );
 }
 
 

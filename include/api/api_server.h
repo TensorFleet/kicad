@@ -22,7 +22,10 @@
 #define KICAD_API_SERVER_H
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <string>
 
@@ -76,6 +79,18 @@ public:
      * @return the response for the GetSupportedCommands API command
      */
     kiapi::common::commands::GetSupportedCommandsResponse SupportedCommands() const;
+
+    /**
+     * Block the calling thread until the server thread has queued a request, or aTimeout has
+     * elapsed.  Hosts without a running wxWidgets event loop (kicad-cli api-server) use this to
+     * know when wxApp::ProcessPendingEvents() has work to do instead of polling.
+     *
+     * The pending flag is cleared on return, so a request that arrives while the caller is
+     * still processing events wakes the next call immediately.
+     *
+     * @return true if a request is waiting to be processed
+     */
+    bool WaitForRequest( std::chrono::milliseconds aTimeout );
 
     void SetReadyToReply( bool aReady = true )
     {
@@ -132,6 +147,13 @@ private:
     std::string m_token;
 
     std::atomic<bool> m_readyToReply;
+
+    /// Signals WaitForRequest from the server thread; see onApiRequest
+    std::mutex m_wakeMutex;
+
+    std::condition_variable m_wakeCondition;
+
+    bool m_requestPending;
 
     wxString m_socketPathOverride;
 

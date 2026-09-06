@@ -84,7 +84,8 @@ KICAD_API_SERVER::KICAD_API_SERVER( bool aAutoStart ) :
         wxEvtHandler(),
         m_serverHandler( std::make_unique<API_HANDLER_SERVER>( this ) ),
         m_token( KIID().AsStdString() ),
-        m_readyToReply( false )
+        m_readyToReply( false ),
+        m_requestPending( false )
 {
     m_handlers.insert( m_serverHandler.get() );
 
@@ -223,6 +224,9 @@ void KICAD_API_SERVER::Stop()
 
     m_server->Stop();
     m_server.reset( nullptr );
+
+    // Release anyone blocked in WaitForRequest
+    m_wakeCondition.notify_all();
 }
 
 
@@ -308,6 +312,25 @@ void KICAD_API_SERVER::onApiRequest( std::string* aRequest )
 
     // Takes ownership and frees the wxCommandEvent
     QueueEvent( evt );
+
+    // Wake a host that is blocked in WaitForRequest rather than running an event loop
+    {
+        std::lock_guard<std::mutex> lock( m_wakeMutex );
+        m_requestPending = true;
+    }
+
+    m_wakeCondition.notify_all();
+}
+
+
+bool KICAD_API_SERVER::WaitForRequest( std::chrono::milliseconds aTimeout )
+{
+    std::unique_lock<std::mutex> lock( m_wakeMutex );
+
+    bool pending = m_wakeCondition.wait_for( lock, aTimeout, [&]() { return m_requestPending; } );
+
+    m_requestPending = false;
+    return pending;
 }
 
 
