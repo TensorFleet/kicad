@@ -517,6 +517,18 @@ message RunBoardJobExportIpcD356
     kiapi.common.types.RunJobSettings job_settings = 1;
 }
 
+// Exports a board as a Specctra DSN design file, the input of external autorouters such as
+// Freerouting, exactly as the board editor's File > Export > Specctra DSN does.  The routed
+// result comes back as a Specctra session file, which ImportSpecctraSession merges into the
+// board; the session is matched to the board by footprint reference, pad number and net name,
+// so it must have been routed from a DSN exported from the same board.  Like the other export
+// jobs, the headless server reads the board file from disk: save first.  Returns RunJobResponse.
+// Since 11.0
+message RunBoardJobExportSpecctra
+{
+    kiapi.common.types.RunJobSettings job_settings = 1;
+}
+
 // Archive/compression mode used for ODB++ output.
 enum OdbCompression
 {
