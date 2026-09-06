@@ -57,7 +57,11 @@
 #include <tool/actions.h>
 #include <tool/tool_manager.h>
 #include <tools/sch_actions.h>
+#include <tools/sch_selection.h>
 #include <tools/sch_selection_tool.h>
+#include <io/kicad/kicad_io_utils.h>
+#include <richio.h>
+#include <sch_io/kicad_sexpr/sch_io_kicad_sexpr.h>
 #include <project.h>
 #include <wildcards_and_files_ext.h>
 #include <wx/filename.h>
@@ -144,6 +148,10 @@ API_HANDLER_SCH::API_HANDLER_SCH( std::shared_ptr<SCH_CONTEXT> aContext,
 
     registerHandler<GetItems, GetItemsResponse>( &API_HANDLER_SCH::handleGetItems );
     registerHandler<GetItemsById, GetItemsResponse>( &API_HANDLER_SCH::handleGetItemsById );
+    registerHandler<SaveDocumentToString, SavedDocumentResponse>( &API_HANDLER_SCH::handleSaveDocumentToString );
+    registerHandler<SaveItemsToString, SavedSelectionResponse>( &API_HANDLER_SCH::handleSaveItemsToString );
+    registerHandler<ParseAndCreateItemsFromString, CreateItemsResponse>(
+            &API_HANDLER_SCH::handleParseAndCreateItemsFromString );
 
     registerHandler<GetSelection, SelectionResponse>( &API_HANDLER_SCH::handleGetSelection, HANDLER_MODE::GUI_ONLY );
     registerHandler<ClearSelection, Empty>( &API_HANDLER_SCH::handleClearSelection, HANDLER_MODE::GUI_ONLY );
@@ -721,6 +729,274 @@ HANDLER_RESULT<ErcSeveritiesResponse> API_HANDLER_SCH::handleSetErcSeverities(
         bumpRevision();
 
     return ercSeverities();
+}
+
+
+HANDLER_RESULT<SavedDocumentResponse>
+API_HANDLER_SCH::handleSaveDocumentToString( const HANDLER_CONTEXT<SaveDocumentToString>& aCtx )
+{
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.document() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    // One sheet file per request: the one the document names (root by default)
+    std::optional<SCH_SHEET_PATH> sheet = resolveSheet( aCtx.Request.document() );
+
+    if( !sheet || !sheet->Last() )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "the schematic has no sheet to save" );
+        return tl::unexpected( e );
+    }
+
+    STRING_FORMATTER   formatter;
+    SCH_IO_KICAD_SEXPR plugin;
+
+    try
+    {
+        plugin.FormatSchematicToFormatter( &formatter, sheet->Last(), schematic() );
+    }
+    catch( const IO_ERROR& ioe )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( fmt::format( "failed to format schematic: {}", ioe.What().ToUTF8().data() ) );
+        return tl::unexpected( e );
+    }
+
+    std::string prettyData = formatter.GetString();
+    KICAD_FORMAT::Prettify( prettyData, KICAD_FORMAT::FORMAT_MODE::COMPACT_TEXT_PROPERTIES );
+
+    SavedDocumentResponse response;
+    response.mutable_document()->CopyFrom( aCtx.Request.document() );
+    response.set_contents( prettyData );
+    return response;
+}
+
+
+HANDLER_RESULT<SavedSelectionResponse>
+API_HANDLER_SCH::handleSaveItemsToString( const HANDLER_CONTEXT<SaveItemsToString>& aCtx )
+{
+    HANDLER_RESULT<std::optional<KIID>> containerResult = validateItemHeaderDocument( aCtx.Request.header() );
+
+    if( !containerResult )
+        return tl::unexpected( containerResult.error() );
+
+    std::optional<SCH_SHEET_PATH> sheet = resolveSheet( aCtx.Request.header().document() );
+
+    if( !sheet || !sheet->LastScreen() )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "the schematic has no sheet to save from" );
+        return tl::unexpected( e );
+    }
+
+    SavedSelectionResponse response;
+    SCH_SELECTION          selection( sheet->LastScreen() );
+
+    for( const types::KIID& id : aCtx.Request.items() )
+    {
+        SCH_SHEET_PATH           itemPath;
+        std::optional<SCH_ITEM*> item = getItemById( KIID( id.value() ), &itemPath );
+
+        if( !item || itemPath.LastScreen() != sheet->LastScreen() )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( fmt::format( "item {} does not exist on the requested sheet", id.value() ) );
+            return tl::unexpected( e );
+        }
+
+        selection.Add( *item );
+        response.add_ids()->set_value( id.value() );
+    }
+
+    // The clipboard format: a kicad_sch container carrying the items' library symbols and
+    // instance data for the given sheet path
+    STRING_FORMATTER   formatter;
+    SCH_IO_KICAD_SEXPR plugin;
+
+    plugin.Format( &selection, &*sheet, *schematic(), &formatter, true );
+
+    std::string prettyData = formatter.GetString();
+    KICAD_FORMAT::Prettify( prettyData, KICAD_FORMAT::FORMAT_MODE::COMPACT_TEXT_PROPERTIES );
+
+    response.set_contents( prettyData );
+    return response;
+}
+
+
+HANDLER_RESULT<CreateItemsResponse>
+API_HANDLER_SCH::handleParseAndCreateItemsFromString( const HANDLER_CONTEXT<ParseAndCreateItemsFromString>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.document() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    if( aCtx.Request.contents().empty() )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "ParseAndCreateItemsFromString requires contents" );
+        return tl::unexpected( e );
+    }
+
+    std::optional<SCH_SHEET_PATH> targetPath = resolveSheet( aCtx.Request.document() );
+
+    if( !targetPath || !targetPath->LastScreen() )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "the schematic has no sheet to create items on" );
+        return tl::unexpected( e );
+    }
+
+    SCH_SCREEN* targetScreen = targetPath->LastScreen();
+
+    // Parse into a scratch sheet, as the Paste action does.  The screen is owned by the sheet.
+    STRING_LINE_READER reader( aCtx.Request.contents(), "ParseAndCreateItemsFromString" );
+    SCH_IO_KICAD_SEXPR plugin;
+    SCH_SHEET          tempSheet;
+    SCH_SCREEN*        tempScreen = new SCH_SCREEN( schematic() );
+    tempSheet.SetScreen( tempScreen );
+
+    try
+    {
+        plugin.LoadContent( reader, &tempSheet );
+    }
+    catch( const IO_ERROR& ioe )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( fmt::format( "contents could not be parsed as a schematic: {}",
+                                          ioe.What().ToUTF8().data() ) );
+        return tl::unexpected( e );
+    }
+
+    std::vector<SCH_ITEM*> items;
+
+    for( SCH_ITEM* item : tempScreen->Items() )
+    {
+        if( item->Type() != SCH_MARKER_T )
+            items.push_back( item );
+    }
+
+    // Pasting a copy of items that are already in the schematic must not collide with them; like
+    // the Paste action, everything gets new ids in that case
+    bool conflict = std::ranges::any_of( items,
+                                         [&]( SCH_ITEM* aItem )
+                                         {
+                                             return getItemById( aItem->m_Uuid ).has_value();
+                                         } );
+
+    SCH_SHEET_LIST hierarchy = schematic()->Hierarchy();
+    wxString       destFile = targetScreen->GetFileName();
+    CreateItemsResponse response;
+
+    // The scratch screen must not free what is handed to the commit
+    tempScreen->Clear( false );
+
+    SCH_COMMIT* commit = static_cast<SCH_COMMIT*>( getCurrentCommit( aCtx.ClientName ) );
+    bool        anyCreated = false;
+
+    for( SCH_ITEM* item : items )
+    {
+        std::unique_ptr<SCH_ITEM> owned( item );
+        ItemStatus                status;
+        google::protobuf::Any     packedInput;
+
+        if( conflict )
+        {
+            const_cast<KIID&>( item->m_Uuid ) = KIID();
+
+            item->RunOnChildren(
+                    []( SCH_ITEM* aChild )
+                    {
+                        const_cast<KIID&>( aChild->m_Uuid ) = KIID();
+                    },
+                    RECURSE_MODE::RECURSE );
+        }
+
+        if( item->Type() == SCH_SYMBOL_T )
+        {
+            SCH_SYMBOL* symbol = static_cast<SCH_SYMBOL*>( item );
+
+            // The pasted text carries its own lib_symbols (an exact copy of what was copied, so
+            // the sheet's cache is not rewritten); fall back to the target sheet's
+            const LIB_SYMBOL* source = nullptr;
+            wxString          libName = symbol->GetSchSymbolLibraryName();
+
+            if( auto it = tempScreen->GetLibSymbols().find( libName ); it != tempScreen->GetLibSymbols().end() )
+                source = it->second;
+            else if( auto it = targetScreen->GetLibSymbols().find( libName ); it != targetScreen->GetLibSymbols().end() )
+                source = it->second;
+
+            if( source )
+                symbol->SetLibSymbol( new LIB_SYMBOL( *source ) );
+
+            // A placement on the target sheet: the pasted reference and unit
+            SCH_SYMBOL_INSTANCE instance;
+
+            if( !symbol->GetInstance( instance, targetPath->Path() ) )
+            {
+                instance.m_Path = targetPath->Path();
+                instance.m_Reference = symbol->GetField( FIELD_T::REFERENCE )->GetText();
+                instance.m_Unit = symbol->GetUnit();
+                symbol->AddHierarchicalReference( instance );
+            }
+        }
+        else if( item->Type() == SCH_SHEET_T )
+        {
+            SCH_SHEET* sheet = static_cast<SCH_SHEET*>( item );
+
+            if( !sheet->GetScreen() )
+                sheet->SetScreen( new SCH_SCREEN( schematic() ) );
+
+            if( !destFile.IsEmpty() && hierarchy.TestForRecursion( SCH_SHEET_LIST( sheet ), destFile ) )
+            {
+                status.set_code( ItemStatusCode::ISC_INVALID_DATA );
+                status.set_error_message( "sheet would create a recursive hierarchy" );
+                packSchItem( packedInput, item, *targetPath );
+                ItemCreationResult* itemResult = response.add_created_items();
+                *itemResult->mutable_status() = status;
+                *itemResult->mutable_item() = packedInput;
+                continue;
+            }
+        }
+
+        if( item->IsConnectable() )
+            item->SetConnectivityDirty();
+
+        // Like the Paste action, pasted items start unlocked
+        item->SetLocked( false );
+
+        commit->Add( owned.release(), targetScreen );
+        anyCreated = true;
+
+        status.set_code( ItemStatusCode::ISC_OK );
+
+        ItemCreationResult* itemResult = response.add_created_items();
+        *itemResult->mutable_status() = status;
+
+        if( !packSchItem( *itemResult->mutable_item(), item, *targetPath ) )
+            item->Serialize( *itemResult->mutable_item() );
+    }
+
+    if( anyCreated && !m_activeClients.contains( aCtx.ClientName ) )
+        pushCurrentCommit( aCtx.ClientName, _( "Pasted items via API" ) );
+
+    if( m_frame && anyCreated )
+        m_frame->RecalculateConnections( nullptr, LOCAL_CLEANUP );
+
+    response.set_status( ItemRequestStatus::IRS_OK );
+    return response;
 }
 
 

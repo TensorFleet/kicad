@@ -19,6 +19,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <algorithm>
 #include <set>
 #include <fmt/ranges.h>
 #include <magic_enum.hpp>
@@ -1251,7 +1252,106 @@ HANDLER_RESULT<CreateItemsResponse> API_HANDLER_BOARD::handleParseAndCreateItems
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
+    if( aCtx.Request.contents().empty() )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "ParseAndCreateItemsFromString requires contents" );
+        return tl::unexpected( e );
+    }
+
+    // The same parser the Paste action uses: a kicad_pcb container (as written by
+    // SaveSelectionToString / SaveItemsToString / SaveDocumentToString) or a single footprint
+    CLIPBOARD_IO io;
+    io.SetBoard( board() );
+    io.SetReader(
+            [&]()
+            {
+                return wxString::FromUTF8( aCtx.Request.contents() );
+            } );
+
+    std::unique_ptr<BOARD_ITEM> parsed( io.Parse() );
+
+    if( !parsed )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "contents could not be parsed as a board or footprint" );
+        return tl::unexpected( e );
+    }
+
+    std::vector<BOARD_ITEM*> items;
+
+    if( parsed->Type() == PCB_T )
+    {
+        BOARD* clipBoard = static_cast<BOARD*>( parsed.get() );
+
+        // Groups reference their members by id, so members must be created first
+        for( BOARD_ITEM* item : clipBoard->GetItemSet() )
+        {
+            if( item->Type() != PCB_MARKER_T && item->Type() != PCB_GROUP_T )
+                items.push_back( item );
+        }
+
+        for( PCB_GROUP* group : clipBoard->Groups() )
+            items.push_back( group );
+    }
+    else
+    {
+        items.push_back( parsed.get() );
+    }
+
+    // Pasting a copy of items that are already on the board must not collide with them; like the
+    // Paste action, everything gets new ids in that case (member references follow the pointers,
+    // so groups still serialize their members' new ids)
+    bool conflict = std::ranges::any_of( items,
+                                         [&]( BOARD_ITEM* aItem )
+                                         {
+                                             return getItemById( aItem->m_Uuid ).has_value();
+                                         } );
+
+    if( conflict )
+    {
+        for( BOARD_ITEM* item : items )
+        {
+            item->ResetUuidDirect();
+            item->RunOnChildren(
+                    []( BOARD_ITEM* aChild )
+                    {
+                        aChild->ResetUuidDirect();
+                    },
+                    RECURSE_MODE::RECURSE );
+        }
+    }
+
+    google::protobuf::RepeatedPtrField<google::protobuf::Any> protoItems;
+
+    for( BOARD_ITEM* item : items )
+        item->Serialize( *protoItems.Add() );
+
+    // The parsed objects have done their job; the items are created from the messages so that
+    // they go through the same validation and commit handling as CreateItems
+    parsed.reset();
+
+    types::ItemHeader header;
+    *header.mutable_document() = aCtx.Request.document();
+
     CreateItemsResponse response;
+
+    HANDLER_RESULT<ItemRequestStatus> result = handleCreateUpdateItemsInternal(
+            true, aCtx.ClientName, header, protoItems,
+            [&]( const ItemStatus& aStatus, const google::protobuf::Any& aItem )
+            {
+                ItemCreationResult itemResult;
+                itemResult.mutable_status()->CopyFrom( aStatus );
+                itemResult.mutable_item()->CopyFrom( aItem );
+                response.mutable_created_items()->Add( std::move( itemResult ) );
+            } );
+
+    if( !result.has_value() )
+        return tl::unexpected( result.error() );
+
+    response.set_status( *result );
     return response;
 }
 

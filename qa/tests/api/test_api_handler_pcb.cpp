@@ -39,6 +39,7 @@
 
 #include <board.h>
 #include <drc/drc_item.h>
+#include <footprint.h>
 #include <board_design_settings.h>
 #include <board_stackup_manager/board_stackup.h>
 #include <connectivity/connectivity_data.h>
@@ -878,6 +879,62 @@ BOOST_AUTO_TEST_CASE( DrcSeveritiesRoundTrip )
     API_RESULT                result = handler.Handle( request );
     BOOST_REQUIRE( !result.has_value() );
     BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_BAD_REQUEST );
+}
+
+
+// Since 11.0: ParseAndCreateItemsFromString parses the clipboard format written by
+// SaveItemsToString and creates the items as CreateItems would; a copy of items already on the
+// board gets new ids, as the Paste action does.
+BOOST_AUTO_TEST_CASE( ParseAndCreateItemsFromStringPastesCopies )
+{
+    BOARD* board = loadBoard( wxS( "api_kitchen_sink" ) );
+
+    API_HANDLER_PCB handler( m_context );
+
+    auto handle = [&]( const auto& aCommand, auto& aResponse )
+    {
+        kiapi::common::ApiRequest request = makeRequest( aCommand );
+        API_RESULT                result = handler.Handle( request );
+
+        BOOST_REQUIRE_MESSAGE( result.has_value(), "request failed: " << result.error().error_message() );
+        BOOST_REQUIRE( result->message().UnpackTo( &aResponse ) );
+    };
+
+    BOOST_REQUIRE( !board->Footprints().empty() );
+    FOOTPRINT* source = board->Footprints()[0];
+    size_t     footprintsBefore = board->Footprints().size();
+
+    kiapi::common::commands::SaveItemsToString save;
+    *save.mutable_header()->mutable_document() = pcbDocument( board );
+    save.add_items()->set_value( source->m_Uuid.AsStdString() );
+
+    kiapi::common::commands::SavedSelectionResponse saved;
+    handle( save, saved );
+    BOOST_REQUIRE( !saved.contents().empty() );
+
+    kiapi::common::commands::ParseAndCreateItemsFromString paste;
+    *paste.mutable_document() = pcbDocument( board );
+    paste.set_contents( saved.contents() );
+
+    kiapi::common::commands::CreateItemsResponse created;
+    handle( paste, created );
+
+    BOOST_REQUIRE_EQUAL( created.created_items_size(), 1 );
+    BOOST_CHECK_EQUAL( created.created_items( 0 ).status().code(), kiapi::common::commands::ISC_OK );
+    BOOST_CHECK_EQUAL( board->Footprints().size(), footprintsBefore + 1 );
+
+    kiapi::board::types::FootprintInstance pasted;
+    BOOST_REQUIRE( created.created_items( 0 ).item().UnpackTo( &pasted ) );
+    BOOST_CHECK_NE( pasted.id().value(), source->m_Uuid.AsStdString() );
+    BOOST_CHECK_EQUAL( pasted.definition().id().entry_name(), source->GetFPID().GetUniStringLibItemName().ToStdString() );
+
+    // Text that is not a board is a bad request, not a crash or a silent no-op
+    paste.set_contents( "(not a board" );
+    kiapi::common::ApiRequest request = makeRequest( paste );
+    API_RESULT                result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_BAD_REQUEST );
+    BOOST_CHECK_EQUAL( board->Footprints().size(), footprintsBefore + 1 );
 }
 
 
