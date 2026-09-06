@@ -63,10 +63,13 @@ public:
      * @param aServer publishes the JobProgress events (may be null)
      * @param aAsync queues the job and returns at once with JS_RUNNING; otherwise the response
      *               is the job's result
+     * @param aExclusive marks a job that rewrites an open document rather than reading a copy of
+     *                   it, so that the editor handlers answer AS_BUSY while it runs
      * @return the job's result, or a JS_RUNNING response carrying the job id (the executor's
      *         result also gets the job id)
      */
-    kiapi::common::types::RunJobResponse Run( KICAD_API_SERVER* aServer, EXECUTOR aExecutor, bool aAsync );
+    kiapi::common::types::RunJobResponse Run( KICAD_API_SERVER* aServer, EXECUTOR aExecutor, bool aAsync,
+                                              bool aExclusive = false );
 
     /// @return the job's status, or std::nullopt for an unknown id
     std::optional<kiapi::common::commands::GetJobStatusResponse> Status( const std::string& aJobId ) const;
@@ -78,6 +81,10 @@ public:
     /// @return true while an asynchronous job is queued or running
     bool Busy() const;
 
+    /// @return the id of the exclusive job that is queued or running, if there is one.  Such a
+    ///         job rewrites an open document, so no other command may touch it meanwhile.
+    std::optional<std::string> ExclusiveJob() const;
+
     ~API_JOB_REGISTRY();
 
 private:
@@ -88,6 +95,7 @@ private:
         std::string                          Id;
         KICAD_API_SERVER*                    Server = nullptr;
         EXECUTOR                             Executor;
+        bool                                 Exclusive = false;
         bool                                 Finished = false;
         uint32_t                             Percent = 0;
         std::string                          Description;

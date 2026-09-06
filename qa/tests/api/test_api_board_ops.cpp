@@ -484,3 +484,69 @@ BOOST_FIXTURE_TEST_CASE( BoardOpsDrcAfterAsyncJobs, API_SERVER_E2E_FIXTURE )
             wxRemoveFile( path );
     }
 }
+
+
+/// RunBoardJobDrc honors RunJobSettings.async: the check is queued on the job worker, the
+/// document is closed to other commands while it runs, and GetJobStatus reports the outcome.
+BOOST_FIXTURE_TEST_CASE( BoardOpsDrcAsync, API_SERVER_E2E_FIXTURE )
+{
+    BOOST_REQUIRE_MESSAGE( Start(), LastError() );
+
+    TEMP_BOARD_PROJECT project;
+    DocumentSpecifier  board;
+    BOOST_REQUIRE_MESSAGE( OpenKitchenSinkBoard( *this, project, &board ),
+                           "OpenDocument failed: " + Client().LastError() );
+
+    wxString error;
+
+    // A synchronous run for the expected marker count
+    RunBoardJobDrc run;
+    *run.mutable_board() = board;
+
+    DrcResultsResponse expected;
+    BOOST_REQUIRE_MESSAGE( Send( Client(), run, &expected, &error ), error );
+    BOOST_REQUIRE_GT( expected.markers_size(), 0 );
+    BOOST_CHECK( expected.job().job_id().empty() );
+
+    // The same check, asynchronously
+    run.mutable_job_settings()->set_async( true );
+
+    DrcResultsResponse started;
+    BOOST_REQUIRE_MESSAGE( Send( Client(), run, &started, &error ), error );
+    BOOST_CHECK_EQUAL( started.markers_size(), 0 );
+    BOOST_REQUIRE_EQUAL( started.job().status(), kiapi::common::types::JS_RUNNING );
+    BOOST_REQUIRE( !started.job().job_id().empty() );
+
+    // The board is off limits until the checker has rebuilt its markers
+    GetDrcMarkers get;
+    *get.mutable_board() = board;
+    BOOST_CHECK_EQUAL( SendStatus( Client(), get ), kiapi::common::AS_BUSY );
+
+    GetJobStatus statusRequest;
+    statusRequest.set_job_id( started.job().job_id() );
+
+    GetJobStatusResponse status;
+
+    for( int attempt = 0; attempt < 1200; ++attempt )
+    {
+        BOOST_REQUIRE_MESSAGE( Send( Client(), statusRequest, &status, &error ), error );
+
+        if( status.state() == JOB_STATE_FINISHED )
+            break;
+
+        wxMilliSleep( 50 );
+    }
+
+    BOOST_REQUIRE_EQUAL( status.state(), JOB_STATE_FINISHED );
+    BOOST_REQUIRE_MESSAGE( status.result().status() == kiapi::common::types::JS_SUCCESS,
+                           "DRC job failed: " + wxString::FromUTF8( status.result().message() ) );
+    BOOST_CHECK_EQUAL( status.job_id(), started.job().job_id() );
+    BOOST_CHECK_EQUAL( status.percent(), 100 );
+
+    // And the markers it placed are the ones the synchronous run found
+    DrcResultsResponse after;
+    BOOST_REQUIRE_MESSAGE( Send( Client(), get, &after, &error ), error );
+    BOOST_CHECK_EQUAL( after.markers_size(), expected.markers_size() );
+    BOOST_CHECK_EQUAL( after.error_count(), expected.error_count() );
+    BOOST_CHECK_EQUAL( after.warning_count(), expected.warning_count() );
+}

@@ -56,6 +56,8 @@
 #include <kiway.h>
 #include <drc/drc_engine.h>
 #include <drc/drc_item.h>
+#include <progress_reporter.h>
+#include <drc/drc_test_provider.h>
 #include <drawing_sheet/ds_proxy_view_item.h>
 #include <footprint_library_adapter.h>
 #include <kiface_ids.h>
@@ -2325,12 +2327,63 @@ HANDLER_RESULT<DrcResultsResponse> API_HANDLER_PCB::handleRunBoardJobDrc( const 
         }
     }
 
-    // An asynchronous job runs on the registry's worker thread and shares this document's
-    // PROJECT, its footprint library adapter and the KiCad thread pool with the checker, which
-    // then rebuilds the board's markers underneath it.  Let the queue drain first, the same way
-    // a synchronous job and IFACE::closeCurrentDocument do.
-    API_JOB_REGISTRY::Instance().WaitForIdle();
+    // The checker rewrites this document's markers, so it may only leave the main thread where
+    // there is no editor window; checkForBusy then keeps every other command off the document
+    // until it is done.  Since 11.0
+    bool async = aCtx.Request.job_settings().async() && !m_frame;
 
+    RunBoardJobDrc request = aCtx.Request;
+
+    API_JOB_REGISTRY::EXECUTOR executor =
+            [this, request]( PROGRESS_REPORTER& aProgress ) -> types::RunJobResponse
+            {
+                types::RunJobResponse                 result;
+                HANDLER_RESULT<DrcResultsResponse> drc = runDrc( request, &aProgress );
+
+                if( !drc )
+                {
+                    result.set_status( types::JobStatus::JS_ERROR );
+                    result.set_message( drc.error().error_message() );
+                    return result;
+                }
+
+                result.set_status( types::JobStatus::JS_SUCCESS );
+                result.set_message( fmt::format( "{} markers: {} errors, {} warnings, {} exclusions",
+                                                 drc->markers_size(), drc->error_count(),
+                                                 drc->warning_count(), drc->exclusion_count() ) );
+                return result;
+            };
+
+    // A synchronous run still goes through the registry, which drains the job queue first: an
+    // export job shares this document's PROJECT, its footprint library adapter and the KiCad
+    // thread pool with the checker.
+    types::RunJobResponse job =
+            API_JOB_REGISTRY::Instance().Run( Server(), std::move( executor ), async, true );
+
+    if( async )
+    {
+        DrcResultsResponse response;
+        *response.mutable_job() = std::move( job );
+        return response;
+    }
+
+    if( job.status() != types::JobStatus::JS_SUCCESS )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_UNKNOWN );
+        e.set_error_message( job.message() );
+        return tl::unexpected( e );
+    }
+
+    DrcResultsResponse response;
+    collectDrcMarkers( response );
+    return response;
+}
+
+
+HANDLER_RESULT<DrcResultsResponse> API_HANDLER_PCB::runDrc( const RunBoardJobDrc& aRequest,
+                                                            PROGRESS_REPORTER* aProgress )
+{
     BOARD*                      brd = board();
     std::shared_ptr<DRC_ENGINE> drcEngine = brd->GetDesignSettings().m_DRCEngine;
 
@@ -2349,12 +2402,12 @@ HANDLER_RESULT<DrcResultsResponse> API_HANDLER_PCB::handleRunBoardJobDrc( const 
 
     // Schematic parity: from an explicit netlist file, or by netlisting the project's schematic
     std::unique_ptr<NETLIST> netlist;
-    bool                     checkParity = aCtx.Request.test_footprints_against_schematic();
+    bool                     checkParity = aRequest.test_footprints_against_schematic();
 
     if( checkParity )
     {
         std::string netlistStr;
-        wxString    netlistPath = wxString::FromUTF8( aCtx.Request.schematic_netlist_path() );
+        wxString    netlistPath = wxString::FromUTF8( aRequest.schematic_netlist_path() );
 
         if( !netlistPath.IsEmpty() )
         {
@@ -2449,7 +2502,7 @@ HANDLER_RESULT<DrcResultsResponse> API_HANDLER_PCB::handleRunBoardJobDrc( const 
         drcEngine->SetSchematicNetlist( netlist.get() );
     }
 
-    if( aCtx.Request.refill_zones() )
+    if( aRequest.refill_zones() )
     {
         TOOL_MANAGER* mgr = toolManager();
 
@@ -2473,7 +2526,15 @@ HANDLER_RESULT<DrcResultsResponse> API_HANDLER_PCB::handleRunBoardJobDrc( const 
     drawingSheet->SetVariantDesc( TO_UTF8( brd->GetVariantDescription( currentVariant ) ) );
 
     drcEngine->SetDrawingSheet( drawingSheet.get() );
-    drcEngine->SetProgressReporter( nullptr );
+    if( aProgress )
+    {
+        // The engine advances one phase per test provider; without this the reported percentage
+        // saturates at the first phase boundary.
+        aProgress->SetNumPhases(
+                static_cast<int>( DRC_TEST_PROVIDER_REGISTRY::Instance().GetTestProviders().size() ) + 1 );
+    }
+
+    drcEngine->SetProgressReporter( aProgress );
 
     BOARD_COMMIT commit( toolManager() );
 
@@ -2488,7 +2549,7 @@ HANDLER_RESULT<DrcResultsResponse> API_HANDLER_PCB::handleRunBoardJobDrc( const 
 
     brd->RecordDRCExclusions();
     brd->DeleteMARKERs( true, true );
-    drcEngine->RunTests( EDA_UNITS::MM, aCtx.Request.report_all_track_errors(), checkParity );
+    drcEngine->RunTests( EDA_UNITS::MM, aRequest.report_all_track_errors(), checkParity );
     drcEngine->ClearViolationHandler();
     drcEngine->SetDrawingSheet( nullptr );
     drcEngine->SetSchematicNetlist( nullptr );

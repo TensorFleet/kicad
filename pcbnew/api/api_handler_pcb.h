@@ -35,6 +35,7 @@ using namespace kiapi::board::jobs;
 
 class JOB;
 class PCB_EDIT_FRAME;
+class PROGRESS_REPORTER;
 class PCB_TRACK;
 class PROPERTY_BASE;
 
@@ -146,6 +147,10 @@ private:
             const HANDLER_CONTEXT<InjectDrcError>& aCtx );
 
     HANDLER_RESULT<DrcResultsResponse> handleRunBoardJobDrc( const HANDLER_CONTEXT<RunBoardJobDrc>& aCtx );
+
+    /// Runs the checker and replaces the board's markers, on the calling thread.  Since 11.0
+    HANDLER_RESULT<DrcResultsResponse> runDrc( const RunBoardJobDrc& aRequest,
+                                               PROGRESS_REPORTER* aProgress );
 
     HANDLER_RESULT<DrcResultsResponse> handleGetDrcMarkers( const HANDLER_CONTEXT<GetDrcMarkers>& aCtx );
 
