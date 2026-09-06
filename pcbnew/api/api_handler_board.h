@@ -90,6 +90,9 @@ protected:
 
     std::optional<ApiResponseStatus> checkForHeadless( const std::string& aCommandName ) const;
 
+    void focusOnItem( const commands::SelectionSpec& aSpec,
+                      commands::FocusOnItemResponse& aResponse ) override;
+
     std::vector<KICAD_T> parseRequestedItemTypes(
             const google::protobuf::RepeatedField<int>& aTypes );
 
@@ -144,6 +147,9 @@ private:
 
     HANDLER_RESULT<commands::SavedSelectionResponse> handleSaveSelectionToString(
             const HANDLER_CONTEXT<commands::SaveSelectionToString>& aCtx );
+
+    HANDLER_RESULT<commands::SavedSelectionResponse> handleSaveItemsToString(
+            const HANDLER_CONTEXT<commands::SaveItemsToString>& aCtx );
 
     HANDLER_RESULT<commands::CreateItemsResponse> handleParseAndCreateItemsFromString(
             const HANDLER_CONTEXT<commands::ParseAndCreateItemsFromString>& aCtx );

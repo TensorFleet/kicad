@@ -115,6 +115,8 @@ message HighlightNetsResponse
   string message = 2;
 }
 
+// Scrolls the editor to the given item and highlights it.  In headless mode (no editor window)
+// this succeeds with CPS_OK without doing anything, so clients do not need to branch.
 message FocusOnItem
 {
   SelectionSpec focus_item = 1;

@@ -95,6 +95,7 @@ API_HANDLER_BOARD::API_HANDLER_BOARD( std::shared_ptr<BOARD_CONTEXT> aContext,
             &API_HANDLER_BOARD::handleSaveDocumentToString );
     registerHandler<SaveSelectionToString, SavedSelectionResponse>(
             &API_HANDLER_BOARD::handleSaveSelectionToString, HANDLER_MODE::GUI_ONLY );
+    registerHandler<SaveItemsToString, SavedSelectionResponse>( &API_HANDLER_BOARD::handleSaveItemsToString );
     registerHandler<ParseAndCreateItemsFromString, CreateItemsResponse>(
             &API_HANDLER_BOARD::handleParseAndCreateItemsFromString );
     registerHandler<GetVisibleLayers, BoardLayers>(
@@ -1165,6 +1166,77 @@ HANDLER_RESULT<SavedSelectionResponse> API_HANDLER_BOARD::handleSaveSelectionToS
     io.SaveSelection( selection, false );
 
     return response;
+}
+
+
+HANDLER_RESULT<SavedSelectionResponse> API_HANDLER_BOARD::handleSaveItemsToString(
+        const HANDLER_CONTEXT<SaveItemsToString>& aCtx )
+{
+    HANDLER_RESULT<std::optional<KIID>> containerResult = validateItemHeaderDocument( aCtx.Request.header() );
+
+    if( !containerResult )
+        return tl::unexpected( containerResult.error() );
+
+    SavedSelectionResponse response;
+    PCB_SELECTION          selection;
+
+    for( const types::KIID& id : aCtx.Request.items() )
+    {
+        std::optional<BOARD_ITEM*> item = getItemById( KIID( id.value() ) );
+
+        if( !item )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( fmt::format( "item {} does not exist in the document", id.value() ) );
+            return tl::unexpected( e );
+        }
+
+        selection.Add( *item );
+        response.add_ids()->set_value( id.value() );
+    }
+
+    CLIPBOARD_IO io;
+    io.SetWriter(
+        [&]( const wxString& aData )
+        {
+            response.set_contents( aData.ToUTF8() );
+        } );
+
+    io.SetBoard( board() );
+    io.SaveSelection( selection, thisDocumentType() == types::DOCTYPE_FOOTPRINT );
+
+    return response;
+}
+
+
+void API_HANDLER_BOARD::focusOnItem( const SelectionSpec& aSpec, FocusOnItemResponse& aResponse )
+{
+    BOARD_ITEM* target = nullptr;
+    wxString    reference;
+
+    if( aSpec.has_footprint() )
+        reference = wxString::FromUTF8( aSpec.footprint().reference() );
+    else if( aSpec.has_pad() )
+        reference = wxString::FromUTF8( aSpec.pad().reference() );
+
+    if( FOOTPRINT* footprint = board()->FindFootprintByReference( reference ) )
+    {
+        if( aSpec.has_pad() )
+            target = footprint->FindPadByNumber( wxString::FromUTF8( aSpec.pad().number() ) );
+        else
+            target = footprint;
+    }
+
+    if( !target )
+    {
+        aResponse.set_status( CrossProbeStatus::CPS_NOT_FOUND );
+        aResponse.set_message( "no item matches the given selection spec" );
+        return;
+    }
+
+    static_cast<PCB_BASE_FRAME*>( m_frame )->FocusOnItem( target );
+    aResponse.set_status( CrossProbeStatus::CPS_OK );
 }
 
 

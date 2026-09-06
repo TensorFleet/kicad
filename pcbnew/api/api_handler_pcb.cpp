@@ -34,6 +34,7 @@
 #include <board_commit.h>
 #include <board_connected_item.h>
 #include <board_design_settings.h>
+#include <board_stackup_manager/board_stackup.h>
 #include <core/kicad_algo.h>
 #include <footprint.h>
 #include <kicad_clipboard.h>
@@ -117,6 +118,7 @@ API_HANDLER_PCB::API_HANDLER_PCB( std::shared_ptr<PCB_CONTEXT> aContext, PCB_EDI
     registerHandler<GetItems, GetItemsResponse>( &API_HANDLER_PCB::handleGetItems );
 
     registerHandler<SetBoardEnabledLayers, BoardEnabledLayersResponse>( &API_HANDLER_PCB::handleSetBoardEnabledLayers );
+    registerHandler<UpdateBoardStackup, BoardStackupResponse>( &API_HANDLER_PCB::handleUpdateBoardStackup );
     registerHandler<GetBoardDesignRules, BoardDesignRulesResponse>( &API_HANDLER_PCB::handleGetBoardDesignRules );
     registerHandler<SetBoardDesignRules, BoardDesignRulesResponse>( &API_HANDLER_PCB::handleSetBoardDesignRules );
     registerHandler<GetCustomDesignRules, CustomRulesResponse>( &API_HANDLER_PCB::handleGetCustomDesignRules );
@@ -625,6 +627,134 @@ HANDLER_RESULT<BoardEnabledLayersResponse> API_HANDLER_PCB::handleSetBoardEnable
     response.set_copper_layer_count( copperLayerCount );
     board::PackLayerSet( *response.mutable_layers(), enabled );
 
+    return response;
+}
+
+
+HANDLER_RESULT<BoardStackupResponse> API_HANDLER_PCB::handleUpdateBoardStackup(
+        const HANDLER_CONTEXT<UpdateBoardStackup>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    BOARD*                 board = this->board();
+    BOARD_DESIGN_SETTINGS& bds = board->GetDesignSettings();
+
+    // Start from the current stackup so that finish, impedance and edge settings omitted from
+    // the request keep their values
+    BOARD_STACKUP stackup = board->GetStackupOrDefault();
+
+    if( !stackup.Deserialize( aCtx.Request.stackup() ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "stackup could not be parsed: every layer needs a known type and, "
+                             "except for dielectric layers, a board layer of that type" );
+        return tl::unexpected( e );
+    }
+
+    // The enabled copper layers define the copper layer count and must form the complete stack
+    // from F.Cu to B.Cu; the other enabled entries define which physical layers the board has.
+    LSEQ copperLayers;
+    LSET stackupLayers;
+
+    for( const BOARD_STACKUP_ITEM* item : stackup.GetList() )
+    {
+        if( !item->IsEnabled() || item->GetBrdLayerId() == UNDEFINED_LAYER )
+            continue;
+
+        stackupLayers.set( item->GetBrdLayerId() );
+
+        if( item->GetType() == BS_ITEM_TYPE_COPPER )
+            copperLayers.push_back( item->GetBrdLayerId() );
+    }
+
+    int copperLayerCount = static_cast<int>( copperLayers.size() );
+
+    if( copperLayerCount < 2 || copperLayerCount % 2 != 0 || copperLayerCount > MAX_CU_LAYERS )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( fmt::format( "stackup must contain an even number of enabled copper "
+                                          "layers between 2 and {}", MAX_CU_LAYERS ) );
+        return tl::unexpected( e );
+    }
+
+    if( copperLayers != LSET::AllCuMask( copperLayerCount ).CuStack() )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "copper layers must be listed top to bottom as F.Cu, In1.Cu, ..., B.Cu" );
+        return tl::unexpected( e );
+    }
+
+    // Only the layers that describe the physical board are affected; Edge.Cuts, courtyards, user
+    // layers and the like are left as they are.
+    LSET previousEnabled = board->GetEnabledLayers();
+    LSET enabled = ( previousEnabled & ~BOARD_STACKUP::StackupAllowedBrdLayers() ) | stackupLayers;
+
+    if( enabled != previousEnabled )
+    {
+        LSEQ removedLayers;
+
+        for( PCB_LAYER_ID layer : previousEnabled )
+        {
+            if( !enabled[layer] && board->HasItemsOnLayer( layer ) )
+                removedLayers.push_back( layer );
+        }
+
+        board->SetEnabledLayers( enabled );
+        board->SetCopperLayerCount( copperLayerCount );
+        board->SetVisibleLayers( board->GetVisibleLayers() | ( enabled ^ previousEnabled ) );
+
+        if( !removedLayers.empty() )
+        {
+            toolManager()->RunAction( PCB_ACTIONS::selectionClear );
+
+            for( PCB_LAYER_ID layer : removedLayers )
+                board->RemoveAllItemsOnLayer( layer );
+
+            // Undo state may hold pointers to the items deleted above
+            if( frame() )
+                frame()->ClearUndoRedoList();
+        }
+    }
+
+    // Store the stackup; disabled entries are dropped, as the board setup dialog does
+    BOARD_STACKUP& brdStackup = bds.GetStackupDescriptor();
+
+    brdStackup.RemoveAll();
+
+    for( const BOARD_STACKUP_ITEM* item : stackup.GetList() )
+    {
+        if( !item->IsEnabled() )
+            continue;
+
+        BOARD_STACKUP_ITEM* copy = new BOARD_STACKUP_ITEM( *item );
+
+        if( copy->GetBrdLayerId() != UNDEFINED_LAYER )
+            copy->SetLayerName( board->GetLayerName( copy->GetBrdLayerId() ) );
+
+        brdStackup.Add( copy );
+    }
+
+    brdStackup.m_FinishType = stackup.m_FinishType;
+    brdStackup.m_HasDielectricConstrains = stackup.m_HasDielectricConstrains;
+    brdStackup.m_EdgeConnectorConstraints = stackup.m_EdgeConnectorConstraints;
+    brdStackup.m_EdgePlating = stackup.m_EdgePlating;
+
+    bds.m_HasStackup = true;
+    bds.SetBoardThickness( brdStackup.BuildBoardThicknessFromStackup() );
+
+    onModified();
+
+    BoardStackupResponse response;
+    board::PackBoardStackup( *board, *response.mutable_stackup() );
     return response;
 }
 
