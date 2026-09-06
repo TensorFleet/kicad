@@ -131,6 +131,9 @@ private:
     HANDLER_RESULT<commands::ProjectInfoResponse> handleGetProjectInfo(
         const HANDLER_CONTEXT<commands::GetProjectInfo>& aCtx );
 
+    HANDLER_RESULT<commands::GetJobStatusResponse> handleGetJobStatus(
+        const HANDLER_CONTEXT<commands::GetJobStatus>& aCtx );
+
 private:
     OPEN_DOCUMENT_HANDLER m_openDocumentHandler;
     CLOSE_ALL_DOCUMENTS_HANDLER m_closeAllDocumentsHandler;

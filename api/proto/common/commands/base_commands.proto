@@ -23,6 +23,7 @@ package kiapi.common.commands;
 
 import "common/types/base_types.proto";
 import "common/types/enums.proto";
+import "common/types/jobs.proto";
 
 message GetVersion
 {
@@ -178,4 +179,37 @@ message GetServerInfoResponse
 
   // Token identifying this KiCad instance; see ApiRequestHeader.kicad_token
   string kicad_token = 3;
+}
+
+// Since: 11.0
+enum JobState
+{
+  JOB_STATE_UNKNOWN = 0;
+  JOB_STATE_RUNNING = 1;
+  JOB_STATE_FINISHED = 2;
+}
+
+// Query a job started with RunJobSettings.async (or any job run through the API recently).
+// Returns GetJobStatusResponse; an unknown job_id is AS_BAD_REQUEST.
+// Since: 11.0
+message GetJobStatus
+{
+  string job_id = 1;
+}
+
+// Since: 11.0
+message GetJobStatusResponse
+{
+  string job_id = 1;
+
+  JobState state = 2;
+
+  // 0 to 100
+  uint32 percent = 3;
+
+  // Human-readable description of the current phase
+  string description = 4;
+
+  // The job's result, once state is JOB_STATE_FINISHED
+  kiapi.common.types.RunJobResponse result = 5;
 }

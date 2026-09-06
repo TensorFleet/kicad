@@ -25,6 +25,7 @@
 #include <common.h>
 #include <fmt.h>
 #include <api/api_handler_pcb.h>
+#include <api/api_jobs.h>
 #include <api/api_pcb_utils.h>
 #include <api/api_enums.h>
 #include <api/api_utils.h>
@@ -2742,35 +2743,24 @@ std::optional<ApiResponseStatus> ApplyBoardPlotSettings( const BoardPlotSettings
 }
 
 
-HANDLER_RESULT<types::RunJobResponse> ExecuteBoardJob( PCB_CONTEXT* aContext, JOB& aJob )
+HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::runBoardJob( const types::RunJobSettings& aSettings,
+                                                                    std::unique_ptr<JOB> aJob )
 {
-    types::RunJobResponse response;
-    WX_STRING_REPORTER reporter;
-
-    if( !aContext || !aContext->GetKiway() )
+    if( !pcbContext()->GetKiway() )
     {
+        types::RunJobResponse response;
         response.set_status( types::JobStatus::JS_ERROR );
         response.set_message( "Internal error" );
-        wxCHECK_MSG( false, response, "context missing valid kiway in ExecuteBoardJob?" );
+        wxCHECK_MSG( false, response, "context missing valid kiway in runBoardJob?" );
         return response;
     }
 
-    int exitCode = aContext->GetKiway()->ProcessJob( KIWAY::FACE_PCB, &aJob, &reporter );
+    // The jobs handler reads an editor window's board directly, so only headless jobs may leave
+    // the main thread
+    bool async = aSettings.async() && !m_frame;
 
-    for( const JOB_OUTPUT& output : aJob.GetOutputs() )
-        response.add_output_path( output.m_outputPath.ToUTF8() );
-
-    if( exitCode == 0 )
-    {
-        response.set_status( types::JobStatus::JS_SUCCESS );
-        return response;
-    }
-
-    response.set_status( types::JobStatus::JS_ERROR );
-    response.set_message( fmt::format( "Board export job '{}' failed with exit code {}: {}",
-                                       aJob.GetType(), exitCode,
-                                       reporter.GetMessages().ToStdString() ) );
-    return response;
+    return RunApiJob( Server(), pcbContext()->GetKiway(), KIWAY::FACE_PCB, std::move( aJob ), async,
+                      aSettings.return_inline() );
 }
 
 
@@ -2785,7 +2775,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExport3D
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_3D job;
+    std::unique_ptr<JOB_EXPORT_PCB_3D> jobPtr = std::make_unique<JOB_EXPORT_PCB_3D>();
+    JOB_EXPORT_PCB_3D&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -2829,7 +2820,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExport3D
     job.m_vrmlModelDir = wxString::FromUTF8( aCtx.Request.vrml_model_dir() );
     job.m_vrmlRelativePaths = aCtx.Request.vrml_relative_paths();
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -2844,7 +2835,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportRe
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_PCB_RENDER job;
+    std::unique_ptr<JOB_PCB_RENDER> jobPtr = std::make_unique<JOB_PCB_RENDER>();
+    JOB_PCB_RENDER&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -2877,7 +2869,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportRe
     job.m_lightSideIntensity = UnpackVector3D( aCtx.Request.light_side_intensity() );
     job.m_lightSideElevation = aCtx.Request.light_side_elevation();
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -2892,7 +2884,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportSv
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_SVG job;
+    std::unique_ptr<JOB_EXPORT_PCB_SVG> jobPtr = std::make_unique<JOB_EXPORT_PCB_SVG>();
+    JOB_EXPORT_PCB_SVG&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -2911,7 +2904,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportSv
 
     job.m_genMode = FromProtoEnum<JOB_EXPORT_PCB_SVG::GEN_MODE>( aCtx.Request.page_mode() );
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -2926,7 +2919,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportDx
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_DXF job;
+    std::unique_ptr<JOB_EXPORT_PCB_DXF> jobPtr = std::make_unique<JOB_EXPORT_PCB_DXF>();
+    JOB_EXPORT_PCB_DXF&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -2953,7 +2947,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportDx
 
     job.m_genMode = FromProtoEnum<JOB_EXPORT_PCB_DXF::GEN_MODE>( aCtx.Request.page_mode() );
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -2968,7 +2962,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportPd
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_PDF job;
+    std::unique_ptr<JOB_EXPORT_PCB_PDF> jobPtr = std::make_unique<JOB_EXPORT_PCB_PDF>();
+    JOB_EXPORT_PCB_PDF&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -2983,7 +2978,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportPd
 
     job.m_pdfGenMode = FromProtoEnum<JOB_EXPORT_PCB_PDF::GEN_MODE>( aCtx.Request.page_mode() );
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -2998,7 +2993,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportPs
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_PS job;
+    std::unique_ptr<JOB_EXPORT_PCB_PS> jobPtr = std::make_unique<JOB_EXPORT_PCB_PS>();
+    JOB_EXPORT_PCB_PS&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -3020,7 +3016,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportPs
     job.m_forceA4 = aCtx.Request.force_a4();
     job.m_useGlobalSettings = aCtx.Request.use_global_settings();
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -3035,7 +3031,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportGe
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_GERBERS job;
+    std::unique_ptr<JOB_EXPORT_PCB_GERBERS> jobPtr = std::make_unique<JOB_EXPORT_PCB_GERBERS>();
+    JOB_EXPORT_PCB_GERBERS&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -3060,7 +3057,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportGe
     case GerberPrecision::GP_6: job.m_precision = 6; break;
     }
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -3075,7 +3072,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportDr
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_DRILL job;
+    std::unique_ptr<JOB_EXPORT_PCB_DRILL> jobPtr = std::make_unique<JOB_EXPORT_PCB_DRILL>();
+    JOB_EXPORT_PCB_DRILL&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -3127,7 +3125,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportDr
             job.m_reportPath = wxString::FromUTF8( aCtx.Request.report_filename() );
     }
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -3142,7 +3140,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportPo
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_POS job;
+    std::unique_ptr<JOB_EXPORT_PCB_POS> jobPtr = std::make_unique<JOB_EXPORT_PCB_POS>();
+    JOB_EXPORT_PCB_POS&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -3172,7 +3171,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportPo
     job.m_units = FromProtoEnum<JOB_EXPORT_PCB_POS::UNITS>( aCtx.Request.units() );
     job.m_format = FromProtoEnum<JOB_EXPORT_PCB_POS::FORMAT>( aCtx.Request.format() );
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -3187,7 +3186,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportGe
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_GENCAD job;
+    std::unique_ptr<JOB_EXPORT_PCB_GENCAD> jobPtr = std::make_unique<JOB_EXPORT_PCB_GENCAD>();
+    JOB_EXPORT_PCB_GENCAD&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -3197,7 +3197,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportGe
     job.m_useDrillOrigin = aCtx.Request.use_drill_origin();
     job.m_useUniquePins = aCtx.Request.use_unique_pins();
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -3212,7 +3212,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportIp
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_IPC2581 job;
+    std::unique_ptr<JOB_EXPORT_PCB_IPC2581> jobPtr = std::make_unique<JOB_EXPORT_PCB_IPC2581>();
+    JOB_EXPORT_PCB_IPC2581&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -3238,7 +3239,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportIp
     job.m_units = FromProtoEnum<JOB_EXPORT_PCB_IPC2581::IPC2581_UNITS>( aCtx.Request.units() );
     job.m_version = FromProtoEnum<JOB_EXPORT_PCB_IPC2581::IPC2581_VERSION>( aCtx.Request.version() );
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -3253,11 +3254,12 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportIp
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_IPCD356 job;
+    std::unique_ptr<JOB_EXPORT_PCB_IPCD356> jobPtr = std::make_unique<JOB_EXPORT_PCB_IPCD356>();
+    JOB_EXPORT_PCB_IPCD356&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -3272,7 +3274,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportOD
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_ODB job;
+    std::unique_ptr<JOB_EXPORT_PCB_ODB> jobPtr = std::make_unique<JOB_EXPORT_PCB_ODB>();
+    JOB_EXPORT_PCB_ODB&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -3290,7 +3293,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportOD
     job.m_units = FromProtoEnum<JOB_EXPORT_PCB_ODB::ODB_UNITS>( aCtx.Request.units() );
     job.m_compressionMode = FromProtoEnum<JOB_EXPORT_PCB_ODB::ODB_COMPRESSION>( aCtx.Request.compression() );
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 
@@ -3305,7 +3308,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportSt
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    JOB_EXPORT_PCB_STATS job;
+    std::unique_ptr<JOB_EXPORT_PCB_STATS> jobPtr = std::make_unique<JOB_EXPORT_PCB_STATS>();
+    JOB_EXPORT_PCB_STATS&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
@@ -3323,7 +3327,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportSt
     job.m_subtractHolesFromBoardArea = aCtx.Request.subtract_holes_from_board_area();
     job.m_subtractHolesFromCopperAreas = aCtx.Request.subtract_holes_from_copper_areas();
 
-    return ExecuteBoardJob( pcbContext(), job );
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
 }
 
 

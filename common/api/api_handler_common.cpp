@@ -22,6 +22,7 @@
 #include <tuple>
 
 #include <api/api_handler_common.h>
+#include <api/api_job_registry.h>
 #include <build_version.h>
 #include <eda_shape.h>
 #include <eda_text.h>
@@ -72,6 +73,7 @@ API_HANDLER_COMMON::API_HANDLER_COMMON() :
     registerHandler<NewProject, OpenDocumentResponse>( &API_HANDLER_COMMON::handleNewProject );
     registerHandler<NewDocument, OpenDocumentResponse>( &API_HANDLER_COMMON::handleNewDocument );
     registerHandler<GetProjectInfo, ProjectInfoResponse>( &API_HANDLER_COMMON::handleGetProjectInfo );
+    registerHandler<GetJobStatus, GetJobStatusResponse>( &API_HANDLER_COMMON::handleGetJobStatus );
 
 }
 
@@ -307,6 +309,19 @@ HANDLER_RESULT<ExpandTextVariablesResponse> API_HANDLER_COMMON::handleExpandText
     }
 
     return reply;
+}
+
+
+HANDLER_RESULT<GetJobStatusResponse> API_HANDLER_COMMON::handleGetJobStatus(
+        const HANDLER_CONTEXT<GetJobStatus>& aCtx )
+{
+    if( std::optional<GetJobStatusResponse> status = API_JOB_REGISTRY::Instance().Status( aCtx.Request.job_id() ) )
+        return *status;
+
+    ApiResponseStatus e;
+    e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+    e.set_error_message( fmt::format( "unknown job id {}", aCtx.Request.job_id() ) );
+    return tl::unexpected( e );
 }
 
 
