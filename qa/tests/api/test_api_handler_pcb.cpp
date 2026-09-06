@@ -28,6 +28,7 @@
 #include <pcbnew_utils/board_test_utils.h>
 
 #include <api/api_enums.h>
+#include <api/api_handler_common.h>
 #include <api/api_handler_pcb.h>
 #include <api/headless_pcb_context.h>
 #include <api/board/board.pb.h>
@@ -40,6 +41,10 @@
 #include <board.h>
 #include <drc/drc_item.h>
 #include <footprint.h>
+#include <geometry/shape_compound.h>
+#include <pcb_table.h>
+#include <pcb_tablecell.h>
+#include <pcb_textbox.h>
 #include <pcb_track.h>
 #include <board_design_settings.h>
 #include <board_stackup_manager/board_stackup.h>
@@ -1133,6 +1138,160 @@ BOOST_AUTO_TEST_CASE( GetItemsPagingAndChangesSinceRevision )
     BOOST_CHECK_EQUAL( page.total(), 0 );
     BOOST_REQUIRE_EQUAL( page.deleted_ids_size(), 1 );
     BOOST_CHECK_EQUAL( page.deleted_ids( 0 ).value(), trackId );
+}
+
+
+/// The bounding box of a set of shapes, ignoring the last aTrailing of them
+BOX2I shapesBoundingBox( const kiapi::common::types::CompoundShape& aShapes, int aTrailingToSkip )
+{
+    BOX2I box;
+    bool  empty = true;
+
+    auto add =
+            [&]( const kiapi::common::types::Vector2& aPoint )
+            {
+                VECTOR2I point( aPoint.x_nm(), aPoint.y_nm() );
+
+                if( empty )
+                {
+                    box = BOX2I( point, VECTOR2I( 0, 0 ) );
+                    empty = false;
+                }
+                else
+                {
+                    box.Merge( point );
+                }
+            };
+
+    for( int ii = 0; ii < aShapes.shapes_size() - aTrailingToSkip; ++ii )
+    {
+        const kiapi::common::types::GraphicShape& shape = aShapes.shapes( ii );
+
+        if( shape.has_segment() )
+        {
+            add( shape.segment().start() );
+            add( shape.segment().end() );
+        }
+        else if( shape.has_polygon() )
+        {
+            for( const kiapi::common::types::PolygonWithHoles& poly : shape.polygon().polygons() )
+            {
+                for( const kiapi::common::types::PolyLineNode& node : poly.outline().nodes() )
+                {
+                    if( node.has_point() )
+                        add( node.point() );
+                }
+            }
+        }
+    }
+
+    return box;
+}
+
+
+/// Ask the common handler for the glyphs of a text box, and report where they landed
+BOX2I textBoxGlyphBoundingBox( const PCB_TEXTBOX* aTextBox )
+{
+    kiapi::board::types::BoardTextBox boardTextBox;
+    aTextBox->Serialize( boardTextBox );
+
+    kiapi::common::commands::GetTextAsShapes command;
+    *command.add_text()->mutable_textbox() = boardTextBox.textbox();
+
+    API_HANDLER_COMMON        handler;
+    kiapi::common::ApiRequest request = makeRequest( command );
+    API_RESULT                result = handler.Handle( request );
+
+    BOOST_REQUIRE_MESSAGE( result.has_value(), "GetTextAsShapes returned " << result.error().error_message() );
+
+    kiapi::common::commands::GetTextAsShapesResponse response;
+    BOOST_REQUIRE( result->message().UnpackTo( &response ) );
+    BOOST_REQUIRE_EQUAL( response.text_with_shapes_size(), 1 );
+
+    // The handler adds the four border segments after the glyphs
+    return shapesBoundingBox( response.text_with_shapes( 0 ).shapes(), 4 );
+}
+
+
+/// The glyphs the plotter draws: the item's own shape, laid out with the pen it plots with
+void checkGlyphsMatch( const wxString& aWhat, const BOX2I& aFromApi, const PCB_TEXTBOX* aTextBox )
+{
+    PCB_TEXTBOX asPlotted( *aTextBox );
+    asPlotted.SetTextThickness( aTextBox->GetEffectiveTextPenWidth() );
+
+    BOX2I expected = asPlotted.GetEffectiveTextShape( false )->BBox();
+
+    BOOST_TEST_CONTEXT( aWhat << ": API " << aFromApi.Format() << " vs item " << expected.Format() )
+    {
+        BOOST_CHECK_LE( std::abs( aFromApi.GetLeft() - expected.GetLeft() ), 1000 );
+        BOOST_CHECK_LE( std::abs( aFromApi.GetTop() - expected.GetTop() ), 1000 );
+        BOOST_CHECK_LE( std::abs( aFromApi.GetRight() - expected.GetRight() ), 1000 );
+        BOOST_CHECK_LE( std::abs( aFromApi.GetBottom() - expected.GetBottom() ), 1000 );
+    }
+}
+
+
+BOOST_AUTO_TEST_CASE( GetTextAsShapesPlacesTextBoxes )
+{
+    BOARD* board = loadBoard( wxS( "api_kitchen_sink" ) );
+
+    int boxes = 0;
+    int cells = 0;
+
+    for( BOARD_ITEM* item : board->Drawings() )
+    {
+        if( item->Type() == PCB_TEXTBOX_T )
+        {
+            PCB_TEXTBOX* textBox = static_cast<PCB_TEXTBOX*>( item );
+
+            if( textBox->GetText().IsEmpty() )
+                continue;
+
+            BOX2I glyphs = textBoxGlyphBoundingBox( textBox );
+            checkGlyphsMatch( textBox->GetText(), glyphs, textBox );
+
+            // ...and that means inside the box the client sent, not around the origin
+            BOOST_CHECK( textBox->GetBoundingBox().Contains( glyphs ) );
+            boxes++;
+        }
+        else if( item->Type() == PCB_TABLE_T )
+        {
+            for( PCB_TABLECELL* cell : static_cast<PCB_TABLE*>( item )->GetCells() )
+            {
+                if( cell->GetText().IsEmpty() )
+                    continue;
+
+                BOX2I glyphs = textBoxGlyphBoundingBox( cell );
+                checkGlyphsMatch( cell->GetText(), glyphs, cell );
+                BOOST_CHECK( cell->GetBoundingBox().Contains( glyphs ) );
+                cells++;
+            }
+        }
+    }
+
+    BOOST_CHECK_GT( boxes, 0 );
+    BOOST_CHECK_GT( cells, 0 );
+
+    // A rotated box turns its text with it
+    for( BOARD_ITEM* item : board->Drawings() )
+    {
+        if( item->Type() != PCB_TEXTBOX_T )
+            continue;
+
+        PCB_TEXTBOX* textBox = static_cast<PCB_TEXTBOX*>( item );
+
+        if( textBox->GetText().IsEmpty() )
+            continue;
+
+        BOX2I before = textBoxGlyphBoundingBox( textBox );
+
+        textBox->Rotate( textBox->GetPosition(), EDA_ANGLE( 30, DEGREES_T ) );
+
+        BOX2I rotated = textBoxGlyphBoundingBox( textBox );
+        checkGlyphsMatch( textBox->GetText() + wxS( " (rotated)" ), rotated, textBox );
+        BOOST_CHECK( rotated.GetCenter() != before.GetCenter() );
+        break;
+    }
 }
 
 

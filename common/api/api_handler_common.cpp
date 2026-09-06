@@ -27,6 +27,7 @@
 #include <eda_shape.h>
 #include <eda_text.h>
 #include <gestfich.h>
+#include <font/font.h>
 #include <geometry/shape_compound.h>
 #include <google/protobuf/empty.pb.h>
 #include <paths.h>
@@ -43,6 +44,123 @@
 using namespace kiapi::common::commands;
 using namespace kiapi::common::types;
 using google::protobuf::Empty;
+
+
+/**
+ * Lay out the text of a text box the way PCB_TEXTBOX and PCB_TABLECELL do when they draw: break
+ * the text to the column width and move it to the anchor the box's justification and margins
+ * imply, so that the glyph shapes come back in document coordinates instead of around the origin.
+ *
+ * @param aText is the text to place, already carrying the box's attributes.
+ * @param aBox is the box as the client sent it.
+ * @return the four corners of the box in drawing order, rotated with the text.
+ */
+static std::vector<VECTOR2I> layOutTextBox( EDA_TEXT& aText, const TextBox& aBox )
+{
+    VECTOR2I one = kiapi::common::UnpackVector2( aBox.top_left() );
+    VECTOR2I two = kiapi::common::UnpackVector2( aBox.bottom_right() );
+
+    const int left = std::min( one.x, two.x );
+    const int right = std::max( one.x, two.x );
+    const int top = std::min( one.y, two.y );
+    const int bottom = std::max( one.y, two.y );
+
+    // The box itself stays axis-aligned; the rotation lives in the text angle
+    EDA_ANGLE angle = aText.GetTextAngle();
+    angle.Normalize();
+
+    const VECTOR2I center( ( left + right ) / 2, ( top + bottom ) / 2 );
+
+    std::vector<VECTOR2I> corners = { VECTOR2I( left, top ), VECTOR2I( right, top ),
+                                      VECTOR2I( right, bottom ), VECTOR2I( left, bottom ) };
+
+    if( !angle.IsZero() )
+    {
+        for( VECTOR2I& corner : corners )
+            RotatePoint( corner, center, angle );
+    }
+
+    const int marginLeft = aBox.margin_left().value_nm();
+    const int marginTop = aBox.margin_top().value_nm();
+    const int marginRight = aBox.margin_right().value_nm();
+    const int marginBottom = aBox.margin_bottom().value_nm();
+
+    // Break the text to the column width the box leaves for it
+    int colWidth = right - left;
+
+    if( angle.IsHorizontal() )
+        colWidth -= marginLeft + marginRight;
+    else
+        colWidth -= marginTop + marginBottom;
+
+    if( KIFONT::FONT* font = aText.GetDrawFont( nullptr ) )
+    {
+        wxString shown = aText.GetShownText( true );
+        font->LinebreakText( shown, colWidth, aText.GetTextSize(), aText.GetEffectiveTextPenWidth(),
+                             aText.IsBold(), aText.IsItalic() );
+        aText.SetText( shown );
+    }
+
+    GR_TEXT_H_ALIGN_T hAlign = aText.GetHorizJustify();
+    GR_TEXT_V_ALIGN_T vAlign = aText.GetVertJustify();
+
+    if( aText.IsMirrored() )
+    {
+        if( hAlign == GR_TEXT_H_ALIGN_LEFT )
+            hAlign = GR_TEXT_H_ALIGN_RIGHT;
+        else if( hAlign == GR_TEXT_H_ALIGN_RIGHT )
+            hAlign = GR_TEXT_H_ALIGN_LEFT;
+    }
+
+    const VECTOR2I midTop = ( corners[0] + corners[1] ) / 2;
+    const VECTOR2I midBottom = ( corners[3] + corners[2] ) / 2;
+    const VECTOR2I midLeft = ( corners[0] + corners[3] ) / 2;
+    const VECTOR2I midRight = ( corners[1] + corners[2] ) / 2;
+    const VECTOR2I boxCenter = ( corners[0] + corners[1] + corners[2] + corners[3] ) / 4;
+
+    VECTOR2I anchor = boxCenter;
+    VECTOR2I offset;
+
+    if( hAlign != GR_TEXT_H_ALIGN_INDETERMINATE && vAlign != GR_TEXT_V_ALIGN_INDETERMINATE )
+    {
+        switch( vAlign )
+        {
+        case GR_TEXT_V_ALIGN_TOP:
+            anchor = hAlign == GR_TEXT_H_ALIGN_LEFT    ? corners[0]
+                     : hAlign == GR_TEXT_H_ALIGN_RIGHT ? corners[1]
+                                                       : midTop;
+            break;
+
+        case GR_TEXT_V_ALIGN_BOTTOM:
+            anchor = hAlign == GR_TEXT_H_ALIGN_LEFT    ? corners[3]
+                     : hAlign == GR_TEXT_H_ALIGN_RIGHT ? corners[2]
+                                                       : midBottom;
+            break;
+
+        default:
+            anchor = hAlign == GR_TEXT_H_ALIGN_LEFT    ? midLeft
+                     : hAlign == GR_TEXT_H_ALIGN_RIGHT ? midRight
+                                                       : boxCenter;
+            break;
+        }
+
+        if( hAlign == GR_TEXT_H_ALIGN_LEFT )
+            offset.x = marginLeft;
+        else if( hAlign == GR_TEXT_H_ALIGN_RIGHT )
+            offset.x = -marginRight;
+
+        if( vAlign == GR_TEXT_V_ALIGN_TOP )
+            offset.y = marginTop;
+        else if( vAlign == GR_TEXT_V_ALIGN_BOTTOM )
+            offset.y = -marginBottom;
+
+        RotatePoint( offset, angle );
+    }
+
+    aText.SetTextPos( anchor + offset );
+
+    return corners;
+}
 
 
 API_HANDLER_COMMON::API_HANDLER_COMMON() :
@@ -243,6 +361,17 @@ HANDLER_RESULT<GetTextAsShapesResponse> API_HANDLER_COMMON::handleGetTextAsShape
             return tl::unexpected( e );
         }
 
+        // An item with no thickness of its own is plotted with the default pen for its size, and
+        // the stroke font lays glyphs out around that pen, so fill it in before asking for shapes
+        text.SetTextThickness( text.GetEffectiveTextPenWidth() );
+
+        std::vector<VECTOR2I> corners;
+
+        // A text box lays its text out relative to the box, so the glyphs come back where the
+        // plotter draws them and not around the origin
+        if( textMsg.has_textbox() )
+            corners = layOutTextBox( text, textMsg.textbox() );
+
         std::shared_ptr<SHAPE_COMPOUND> shapes = text.GetEffectiveTextShape( false );
 
         TextWithShapes* entry = reply.add_text_with_shapes();
@@ -256,35 +385,14 @@ HANDLER_RESULT<GetTextAsShapesResponse> API_HANDLER_COMMON::handleGetTextAsShape
             any.UnpackTo( shapeMsg );
         }
 
-        if( textMsg.has_textbox() )
+        // The border follows the box, so it turns with the text
+        for( size_t ii = 0; ii < corners.size(); ii++ )
         {
             GraphicShape* border = entry->mutable_shapes()->add_shapes();
             int width = textMsg.textbox().attributes().stroke_width().value_nm();
             border->mutable_attributes()->mutable_stroke()->mutable_width()->set_value_nm( width );
-            VECTOR2I tl = UnpackVector2( textMsg.textbox().top_left() );
-            VECTOR2I br = UnpackVector2( textMsg.textbox().bottom_right() );
-
-            // top
-            PackVector2( *border->mutable_segment()->mutable_start(), tl );
-            PackVector2( *border->mutable_segment()->mutable_end(), VECTOR2I( br.x, tl.y ) );
-
-            // right
-            border = entry->mutable_shapes()->add_shapes();
-            border->mutable_attributes()->mutable_stroke()->mutable_width()->set_value_nm( width );
-            PackVector2( *border->mutable_segment()->mutable_start(), VECTOR2I( br.x, tl.y ) );
-            PackVector2( *border->mutable_segment()->mutable_end(), br );
-
-            // bottom
-            border = entry->mutable_shapes()->add_shapes();
-            border->mutable_attributes()->mutable_stroke()->mutable_width()->set_value_nm( width );
-            PackVector2( *border->mutable_segment()->mutable_start(), br );
-            PackVector2( *border->mutable_segment()->mutable_end(), VECTOR2I( tl.x, br.y ) );
-
-            // left
-            border = entry->mutable_shapes()->add_shapes();
-            border->mutable_attributes()->mutable_stroke()->mutable_width()->set_value_nm( width );
-            PackVector2( *border->mutable_segment()->mutable_start(), VECTOR2I( tl.x, br.y ) );
-            PackVector2( *border->mutable_segment()->mutable_end(), tl );
+            PackVector2( *border->mutable_segment()->mutable_start(), corners[ii] );
+            PackVector2( *border->mutable_segment()->mutable_end(), corners[( ii + 1 ) % corners.size()] );
         }
     }
 
