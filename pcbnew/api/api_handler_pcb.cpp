@@ -622,7 +622,8 @@ bool API_HANDLER_PCB::collectItems( const std::vector<KICAD_T>& aTypes, std::vec
 std::map<KICAD_T, uint32_t> API_HANDLER_PCB::countItems( const DocumentSpecifier& aDocument )
 {
     // Every type handleGetItems serves
-    static const std::vector<KICAD_T> allTypes = { PCB_TRACE_T,     PCB_PAD_T,  PCB_FOOTPRINT_T, PCB_SHAPE_T, PCB_TABLE_T,
+    static const std::vector<KICAD_T> allTypes = { PCB_TRACE_T,     PCB_ARC_T,     PCB_VIA_T,
+                                                   PCB_PAD_T,       PCB_FOOTPRINT_T, PCB_SHAPE_T, PCB_TABLE_T,
                                                    PCB_TEXT_T,      PCB_TEXTBOX_T, PCB_BARCODE_T, PCB_REFERENCE_IMAGE_T,
                                                    PCB_GRIDITEM_T,  PCB_DIMENSION_T, PCB_ZONE_T, PCB_GROUP_T, PCB_POINT_T,
                                                    PCB_CONSTRAINT_T };
