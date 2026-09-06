@@ -1,4 +1,0 @@
-(fp_lib_table
-  (version 7)
-  (lib (name "Resistor_SMD") (type "KiCad") (uri "/Users/hyper/projects/tensorfleet/kicad/qa/data/.kicad-web-probe/Resistor_SMD.pretty") (options "") (descr ""))
-)
