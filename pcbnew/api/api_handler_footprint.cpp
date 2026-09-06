@@ -59,7 +59,7 @@ API_HANDLER_FOOTPRINT::API_HANDLER_FOOTPRINT( std::shared_ptr<FOOTPRINT_CONTEXT>
     registerHandler<SaveDocument, Empty>( &API_HANDLER_FOOTPRINT::handleSaveDocument );
     registerHandler<SaveCopyOfDocument, Empty>(
             &API_HANDLER_FOOTPRINT::handleSaveCopyOfDocument );
-    registerHandler<RevertDocument, Empty>( &API_HANDLER_FOOTPRINT::handleRevertDocument );
+    registerHandler<RevertDocument, Empty>( &API_HANDLER_FOOTPRINT::handleRevertDocument, HANDLER_MODE::GUI_ONLY );
 
     registerHandler<GetItems, GetItemsResponse>( &API_HANDLER_FOOTPRINT::handleGetItems );
 }
@@ -290,6 +290,9 @@ HANDLER_RESULT<Empty> API_HANDLER_FOOTPRINT::handleRevertDocument(
 
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
+
+    if( std::optional<ApiResponseStatus> headless = checkForHeadless( "RevertDocument" ) )
+        return tl::unexpected( *headless );
 
     frame()->GetScreen()->SetContentModified( false );
     frame()->RevertFootprint(); // dialog is suppressed by ^

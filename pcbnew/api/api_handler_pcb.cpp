@@ -112,7 +112,7 @@ API_HANDLER_PCB::API_HANDLER_PCB( std::shared_ptr<PCB_CONTEXT> aContext, PCB_EDI
             &API_HANDLER_PCB::handleGetOpenDocuments );
     registerHandler<SaveDocument, Empty>( &API_HANDLER_PCB::handleSaveDocument );
     registerHandler<SaveCopyOfDocument, Empty>( &API_HANDLER_PCB::handleSaveCopyOfDocument );
-    registerHandler<RevertDocument, Empty>( &API_HANDLER_PCB::handleRevertDocument );
+    registerHandler<RevertDocument, Empty>( &API_HANDLER_PCB::handleRevertDocument, HANDLER_MODE::GUI_ONLY );
 
     registerHandler<GetItems, GetItemsResponse>( &API_HANDLER_PCB::handleGetItems );
 
@@ -139,9 +139,9 @@ API_HANDLER_PCB::API_HANDLER_PCB( std::shared_ptr<PCB_CONTEXT> aContext, PCB_EDI
     registerHandler<ImportNetlist, ImportNetlistResponse>( &API_HANDLER_PCB::handleImportNetlist );
 
     registerHandler<GetBoardEditorAppearanceSettings, BoardEditorAppearanceSettings>(
-            &API_HANDLER_PCB::handleGetBoardEditorAppearanceSettings );
+            &API_HANDLER_PCB::handleGetBoardEditorAppearanceSettings, HANDLER_MODE::GUI_ONLY );
     registerHandler<SetBoardEditorAppearanceSettings, Empty>(
-            &API_HANDLER_PCB::handleSetBoardEditorAppearanceSettings );
+            &API_HANDLER_PCB::handleSetBoardEditorAppearanceSettings, HANDLER_MODE::GUI_ONLY );
     registerHandler<GetBoardPlotSettings, BoardPlotSettingsResponse>( &API_HANDLER_PCB::handleGetBoardPlotSettings );
     registerHandler<SetBoardPlotSettings, Empty>( &API_HANDLER_PCB::handleSetBoardPlotSettings );
     registerHandler<InjectDrcError, InjectDrcErrorResponse>(
@@ -190,8 +190,10 @@ API_HANDLER_PCB::API_HANDLER_PCB( std::shared_ptr<PCB_CONTEXT> aContext, PCB_EDI
     registerHandler<SetPageSettings, types::PageSettings>( &API_HANDLER_PCB::handleSetPageSettings );
 
     registerHandler<CrossProbeAnnounce, CrossProbeAnnounceResponse>( &API_HANDLER_PCB::handleCrossProbeAnnounce );
-    registerHandler<SyncSelection, SyncSelectionResponse>( &API_HANDLER_PCB::handleSyncSelection );
-    registerHandler<HighlightNets, HighlightNetsResponse>( &API_HANDLER_PCB::handleHighlightNets );
+    registerHandler<SyncSelection, SyncSelectionResponse>(
+            &API_HANDLER_PCB::handleSyncSelection, HANDLER_MODE::GUI_ONLY );
+    registerHandler<HighlightNets, HighlightNetsResponse>(
+            &API_HANDLER_PCB::handleHighlightNets, HANDLER_MODE::GUI_ONLY );
 }
 
 

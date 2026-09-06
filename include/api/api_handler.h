@@ -22,7 +22,10 @@
 #define KICAD_API_HANDLER_H
 
 #include <functional>
+#include <map>
 #include <optional>
+#include <string>
+#include <vector>
 
 #include <fmt/format.h>
 #include <tl/expected.hpp>
@@ -67,6 +70,32 @@ public:
      */
     API_RESULT Handle( ApiRequest& aMsg );
 
+    /**
+     * Whether a command can be served when KiCad is running without an editor window.
+     * Commands registered as GUI_ONLY are still dispatched in headless mode; they are expected to
+     * answer AS_UNIMPLEMENTED themselves (see checkForHeadless in the editor handlers).  The mode
+     * is reported to clients through GetSupportedCommands.
+     */
+    enum class HANDLER_MODE
+    {
+        HEADLESS_CAPABLE,
+        GUI_ONLY
+    };
+
+    /// Description of one command served by this handler; see SupportedCommands.
+    struct SUPPORTED_COMMAND
+    {
+        std::string  RequestTypeName;   ///< Protobuf full name, e.g. kiapi.common.commands.Ping
+        std::string  ResponseTypeName;  ///< Protobuf full name of the success response
+        HANDLER_MODE Mode;
+    };
+
+    /**
+     * @return a description of every command registered with this handler, in registration
+     *         order.  Used by the API server to answer GetSupportedCommands.
+     */
+    std::vector<SUPPORTED_COMMAND> SupportedCommands() const;
+
 protected:
 
     /**
@@ -88,17 +117,26 @@ protected:
      * @tparam ResponseType is a protobuf message type containing a command response
      * @tparam HandlerType is the implied type of the API_HANDLER subclass
      * @param aHandler is the handler function for the given request and response types
+     * @param aMode declares whether the command can be served without an editor window; this is
+     *              only metadata for GetSupportedCommands and does not affect dispatch
      */
     template <class RequestType, class ResponseType, class HandlerType>
     void registerHandler( HANDLER_RESULT<ResponseType> ( HandlerType::*aHandler )(
-            const HANDLER_CONTEXT<RequestType>& ) )
+                                  const HANDLER_CONTEXT<RequestType>& ),
+                          HANDLER_MODE aMode = HANDLER_MODE::HEADLESS_CAPABLE )
     {
         std::string typeName { RequestType().GetTypeName() };
 
         wxASSERT_MSG( !m_handlers.contains( typeName ),
                       wxString::Format( "Duplicate API handler for type %s", typeName ) );
 
-        m_handlers[typeName] =
+        m_registrationOrder.push_back( typeName );
+
+        REGISTERED_HANDLER& entry = m_handlers[typeName];
+        entry.ResponseTypeName = ResponseType().GetTypeName();
+        entry.Mode = aMode;
+
+        entry.Handler =
                 [this, aHandler]( ApiRequest& aRequest ) -> API_RESULT
                 {
                     HANDLER_CONTEXT<RequestType> ctx;
@@ -125,8 +163,19 @@ protected:
                 };
     }
 
+    /// A handler method together with the metadata reported by GetSupportedCommands
+    struct REGISTERED_HANDLER
+    {
+        REQUEST_HANDLER Handler;
+        std::string     ResponseTypeName;
+        HANDLER_MODE    Mode;
+    };
+
     /// Maps type name (without the URL prefix) to a handler method
-    std::map<std::string, REQUEST_HANDLER> m_handlers;
+    std::map<std::string, REGISTERED_HANDLER> m_handlers;
+
+    /// Request type names in the order they were registered, for stable command listings
+    std::vector<std::string> m_registrationOrder;
 
     static const wxString m_defaultCommitMessage;
 

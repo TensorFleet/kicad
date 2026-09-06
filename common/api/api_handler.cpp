@@ -51,11 +51,30 @@ API_RESULT API_HANDLER::Handle( ApiRequest& aMsg )
 
     if( it != m_handlers.end() )
     {
-        REQUEST_HANDLER& handler = it->second;
+        REQUEST_HANDLER& handler = it->second.Handler;
         return handler( aMsg );
     }
 
     status.set_status( ApiStatusCode::AS_UNHANDLED );
     // This response is used internally; no need for an error message
     return tl::unexpected( status );
+}
+
+
+std::vector<API_HANDLER::SUPPORTED_COMMAND> API_HANDLER::SupportedCommands() const
+{
+    std::vector<SUPPORTED_COMMAND> commands;
+    commands.reserve( m_registrationOrder.size() );
+
+    for( const std::string& typeName : m_registrationOrder )
+    {
+        auto it = m_handlers.find( typeName );
+
+        if( it == m_handlers.end() )
+            continue;
+
+        commands.push_back( { typeName, it->second.ResponseTypeName, it->second.Mode } );
+    }
+
+    return commands;
 }

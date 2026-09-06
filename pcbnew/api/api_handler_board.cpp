@@ -63,15 +63,16 @@ API_HANDLER_BOARD::API_HANDLER_BOARD( std::shared_ptr<BOARD_CONTEXT> aContext,
 {
     wxCHECK( m_context, /* void */ );
 
-    registerHandler<RunAction, RunActionResponse>( &API_HANDLER_BOARD::handleRunAction );
+    registerHandler<RunAction, RunActionResponse>( &API_HANDLER_BOARD::handleRunAction, HANDLER_MODE::GUI_ONLY );
 
     registerHandler<GetItemsById, GetItemsResponse>( &API_HANDLER_BOARD::handleGetItemsById );
 
-    registerHandler<GetSelection, SelectionResponse>( &API_HANDLER_BOARD::handleGetSelection );
-    registerHandler<ClearSelection, Empty>( &API_HANDLER_BOARD::handleClearSelection );
-    registerHandler<AddToSelection, SelectionResponse>( &API_HANDLER_BOARD::handleAddToSelection );
+    registerHandler<GetSelection, SelectionResponse>( &API_HANDLER_BOARD::handleGetSelection, HANDLER_MODE::GUI_ONLY );
+    registerHandler<ClearSelection, Empty>( &API_HANDLER_BOARD::handleClearSelection, HANDLER_MODE::GUI_ONLY );
+    registerHandler<AddToSelection, SelectionResponse>(
+            &API_HANDLER_BOARD::handleAddToSelection, HANDLER_MODE::GUI_ONLY );
     registerHandler<RemoveFromSelection, SelectionResponse>(
-            &API_HANDLER_BOARD::handleRemoveFromSelection );
+            &API_HANDLER_BOARD::handleRemoveFromSelection, HANDLER_MODE::GUI_ONLY );
 
     registerHandler<GetBoardStackup, BoardStackupResponse>( &API_HANDLER_BOARD::handleGetStackup );
     registerHandler<GetBoardEnabledLayers, BoardEnabledLayersResponse>(
@@ -86,19 +87,22 @@ API_HANDLER_BOARD::API_HANDLER_BOARD( std::shared_ptr<BOARD_CONTEXT> aContext,
     registerHandler<ExpandTextVariables, ExpandTextVariablesResponse>(
             &API_HANDLER_BOARD::handleExpandTextVariables );
 
-    registerHandler<InteractiveMoveItems, Empty>( &API_HANDLER_BOARD::handleInteractiveMoveItems );
+    registerHandler<InteractiveMoveItems, Empty>(
+            &API_HANDLER_BOARD::handleInteractiveMoveItems, HANDLER_MODE::GUI_ONLY );
     registerHandler<FlipItems, FlipItemsResponse>( &API_HANDLER_BOARD::handleFlipItems );
 
     registerHandler<SaveDocumentToString, SavedDocumentResponse>(
             &API_HANDLER_BOARD::handleSaveDocumentToString );
     registerHandler<SaveSelectionToString, SavedSelectionResponse>(
-            &API_HANDLER_BOARD::handleSaveSelectionToString );
+            &API_HANDLER_BOARD::handleSaveSelectionToString, HANDLER_MODE::GUI_ONLY );
     registerHandler<ParseAndCreateItemsFromString, CreateItemsResponse>(
             &API_HANDLER_BOARD::handleParseAndCreateItemsFromString );
-    registerHandler<GetVisibleLayers, BoardLayers>( &API_HANDLER_BOARD::handleGetVisibleLayers );
-    registerHandler<SetVisibleLayers, Empty>( &API_HANDLER_BOARD::handleSetVisibleLayers );
-    registerHandler<GetActiveLayer, BoardLayerResponse>( &API_HANDLER_BOARD::handleGetActiveLayer );
-    registerHandler<SetActiveLayer, Empty>( &API_HANDLER_BOARD::handleSetActiveLayer );
+    registerHandler<GetVisibleLayers, BoardLayers>(
+            &API_HANDLER_BOARD::handleGetVisibleLayers, HANDLER_MODE::GUI_ONLY );
+    registerHandler<SetVisibleLayers, Empty>( &API_HANDLER_BOARD::handleSetVisibleLayers, HANDLER_MODE::GUI_ONLY );
+    registerHandler<GetActiveLayer, BoardLayerResponse>(
+            &API_HANDLER_BOARD::handleGetActiveLayer, HANDLER_MODE::GUI_ONLY );
+    registerHandler<SetActiveLayer, Empty>( &API_HANDLER_BOARD::handleSetActiveLayer, HANDLER_MODE::GUI_ONLY );
 }
 
 

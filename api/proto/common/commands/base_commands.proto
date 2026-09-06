@@ -123,3 +123,37 @@ message GetPathsResponse
 {
   repeated PathEntry paths = 1;
 }
+
+// Describes one API command that the running KiCad instance can serve.
+// Since 11.0
+message SupportedCommand
+{
+  // Fully-qualified type URL of the request message, as it appears in ApiRequest.message
+  // (for example, "type.googleapis.com/kiapi.common.commands.Ping")
+  string type_url = 1;
+
+  // Type URL of the message returned in ApiResponse.message on success
+  string response_type_url = 2;
+
+  // True if the command can be served when KiCad is running without an editor window (for
+  // example, under `kicad-cli api-server`).  Commands that require an editor frame (selection,
+  // active/visible layers, interactive tools, ...) report false and answer AS_UNIMPLEMENTED
+  // in headless mode.
+  bool headless = 3;
+}
+
+// Lists every command that is currently served by this KiCad instance.  The list is built from
+// the handlers registered with the API server at the time of the request: commands that operate
+// on a document (board, schematic, footprint, ...) appear only once a document of that type is
+// open, so clients should query again after OpenDocument.
+// Returns GetSupportedCommandsResponse
+// Since 11.0
+message GetSupportedCommands
+{
+}
+
+// Since 11.0
+message GetSupportedCommandsResponse
+{
+  repeated SupportedCommand commands = 1;
+}
