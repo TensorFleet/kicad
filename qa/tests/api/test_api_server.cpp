@@ -88,6 +88,12 @@ struct API_SERVER_FIXTURE
     void loadBoard( const wxString& aRelPath )
     {
         KI_TEST::LoadBoard( m_settingsManager, aRelPath, m_board );
+
+        // LoadBoard does not name the board it read, and the document specifier a client sends
+        // is matched against that name
+        m_board->SetFileName( wxString::FromUTF8( KI_TEST::GetPcbnewTestDataDir() ) + aRelPath
+                              + wxS( ".kicad_pcb" ) );
+
         m_context = std::make_shared<HEADLESS_PCB_CONTEXT>( std::move( m_board ), &m_settingsManager.Prj(),
                                                             nullptr );
     }
@@ -148,9 +154,14 @@ BOOST_AUTO_TEST_CASE( SupportedCommandsReportsHeadlessCapability )
     BOOST_CHECK( commands[refill].headless() );
     BOOST_CHECK_EQUAL( commands[refill].response_type_url(), typeUrl( google::protobuf::Empty() ) );
 
+    // RunAction is headless-capable since 11.0: the actions whose tools work without a window
+    // run in kicad-cli api-server, and the rest are refused per-action, not per-command
+    std::string runAction = typeUrl( kiapi::common::commands::RunAction() );
+    BOOST_REQUIRE( commands.contains( runAction ) );
+    BOOST_CHECK( commands[runAction].headless() );
+
     // Commands that need an editor frame are listed but flagged as not available headless
-    for( const std::string& guiOnly : { typeUrl( kiapi::common::commands::RunAction() ),
-                                        typeUrl( kiapi::common::commands::GetSelection() ),
+    for( const std::string& guiOnly : { typeUrl( kiapi::common::commands::GetSelection() ),
                                         typeUrl( kiapi::common::commands::SaveSelectionToString() ),
                                         typeUrl( kiapi::board::commands::GetActiveLayer() ),
                                         typeUrl( kiapi::common::commands::RevertDocument() ) } )
