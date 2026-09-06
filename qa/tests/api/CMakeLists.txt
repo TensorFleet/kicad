@@ -25,6 +25,7 @@ set( QA_API_SRCS
     test_api_server.cpp
     test_api_jobs.cpp
     test_api_libraries.cpp
+    test_api_schematic_ops.cpp
     test_api_run_action.cpp
     test_api_wizards.cpp
     )

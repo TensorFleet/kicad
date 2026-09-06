@@ -23,6 +23,7 @@ package kiapi.schematic.commands;
 
 import "common/types/base_types.proto";
 import "common/types/enums.proto";
+import "board/board_commands.proto";
 import "schematic/schematic_rules.proto";
 import "schematic/schematic_types.proto";
 
@@ -128,4 +129,331 @@ message SetErcSeverities
   kiapi.common.types.DocumentSpecifier schematic = 1;
 
   repeated kiapi.schematic.ErcSeveritySetting severities = 2;
+}
+
+
+//// Annotation ////
+
+// Since 11.0
+enum AnnotateScope
+{
+  ANS_UNKNOWN = 0;
+
+  // Every sheet of the schematic
+  ANS_ALL = 1;
+
+  // The sheet named by the document's sheet_path (the root sheet if none), plus its sub-sheets
+  // when AnnotateOptions.recursive is set
+  ANS_SHEET = 2;
+
+  // The symbols (and sheets, when recursive) listed in Annotate.items, on the document's sheet
+  ANS_SELECTION = 3;
+}
+
+// Since 11.0
+enum AnnotateSortOrder
+{
+  ASO_UNKNOWN = 0;
+  ASO_X_POSITION = 1;
+  ASO_Y_POSITION = 2;
+  ASO_UNSORTED = 3;
+}
+
+// Since 11.0
+enum AnnotateNumbering
+{
+  ANM_UNKNOWN = 0;
+
+  // First free number
+  ANM_INCREMENTAL = 1;
+
+  // First free number starting at sheet number * 100
+  ANM_SHEET_NUMBER_X100 = 2;
+
+  // First free number starting at sheet number * 1000
+  ANM_SHEET_NUMBER_X1000 = 3;
+}
+
+// Since 11.0
+message AnnotateOptions
+{
+  // Defaults (ASO_UNKNOWN / ANM_UNKNOWN / 0) take the values from the schematic settings
+  AnnotateSortOrder sort_order = 1;
+
+  AnnotateNumbering numbering = 2;
+
+  uint32 start_number = 3;
+
+  // Clear existing references first; otherwise only unannotated symbols get numbers
+  bool reset_existing = 4;
+
+  // Include sub-sheets of the sheet (ANS_SHEET) or of the selected sheets (ANS_SELECTION)
+  bool recursive = 5;
+
+  // Let units of multi-unit symbols be regrouped freely instead of keeping their current sets
+  bool regroup_units = 6;
+}
+
+// Annotates symbols the way the annotation dialog does.  Symbols keep their references unless
+// options.reset_existing is set.  The change is recorded as an API commit.
+// Returns AnnotateResponse
+// Since 11.0
+message Annotate
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+
+  AnnotateScope scope = 2;
+
+  // Symbols and sheets for ANS_SELECTION
+  repeated kiapi.common.types.KIID items = 3;
+
+  AnnotateOptions options = 4;
+}
+
+// Since 11.0
+message AnnotateResponse
+{
+  // Symbols whose reference was assigned or changed by this call
+  uint32 annotated_count = 1;
+
+  // Symbols considered (annotated or already correct)
+  uint32 symbol_count = 2;
+
+  // Problems reported by the annotation check afterwards (duplicates, missing numbers)
+  uint32 error_count = 3;
+
+  // Human-readable report lines
+  repeated string messages = 4;
+}
+
+// Clears the references of the symbols in scope (they become "R?").
+// Returns AnnotateResponse (annotated_count is the number of symbols cleared)
+// Since 11.0
+message ClearAnnotation
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+
+  AnnotateScope scope = 2;
+
+  repeated kiapi.common.types.KIID items = 3;
+
+  bool recursive = 4;
+}
+
+
+//// Board synchronization ////
+
+// Updates an open board from the open schematic in one step ("Update PCB from Schematic"): the
+// schematic netlist is exported and applied to the board with BOARD_NETLIST_UPDATER.  Both
+// documents must be open in this KiCad instance.
+// Returns SyncSchematicToBoardResponse
+// Since 11.0
+message SyncSchematicToBoard
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+
+  kiapi.common.types.DocumentSpecifier board = 2;
+
+  // Report planned changes without modifying the board
+  bool dry_run = 3;
+
+  kiapi.board.commands.NetlistMatchMode match_mode = 4;
+
+  bool delete_extra_footprints = 5;
+
+  // Replace footprints whose library id changed in the schematic
+  bool update_footprints = 6;
+
+  // Copy symbol field values to the footprints (default true; set to false to keep the
+  // footprints' fields)
+  optional bool update_fields = 7;
+
+  // Remove footprint fields that the symbol does not have (only with update_fields)
+  bool remove_extra_fields = 8;
+
+  bool transfer_groups = 9;
+
+  bool override_locks = 10;
+}
+
+// Since 11.0
+message SyncSchematicToBoardResponse
+{
+  kiapi.board.commands.ImportNetlistResponse result = 1;
+
+  // The netlist file that was applied; a temporary file the server removes afterwards, so
+  // this is informational only
+  string netlist_path = 2;
+}
+
+
+//// Schematic settings ////
+
+// The subset of the project's schematic settings the API exposes.  Every field is optional so
+// that SetSchematicSettings changes only what is sent.
+// Since 11.0
+message SchematicSettings
+{
+  optional kiapi.common.types.Distance default_line_width = 1;
+  optional kiapi.common.types.Distance default_text_size = 2;
+
+  // Label size as a ratio of the default text size
+  optional double label_size_ratio = 3;
+  optional double text_offset_ratio = 4;
+  optional kiapi.common.types.Distance pin_symbol_size = 5;
+
+  // 0 = none, 1 = smallest, 2 = small, 3 = default, 4 = large, 5 = largest
+  optional uint32 junction_size_choice = 6;
+  optional uint32 hop_over_size_choice = 7;
+  optional bool show_dnp_markers = 8;
+  optional kiapi.common.types.Distance connection_grid_size = 9;
+
+  optional uint32 annotate_start_number = 10;
+  optional AnnotateSortOrder annotate_sort_order = 11;
+  optional AnnotateNumbering annotate_numbering = 12;
+
+  optional bool intersheet_refs_show = 13;
+  optional bool intersheet_refs_list_own_page = 14;
+  optional bool intersheet_refs_format_short = 15;
+  optional string intersheet_refs_prefix = 16;
+  optional string intersheet_refs_suffix = 17;
+
+  optional double dashed_line_dash_ratio = 18;
+  optional double dashed_line_gap_ratio = 19;
+
+  optional string drawing_sheet_file = 20;
+  optional string plot_directory = 21;
+
+  // Multi-unit reference suffix: separator character (empty for none) and first id ('A' or '1')
+  optional string subpart_id_separator = 22;
+  optional string subpart_first_id = 23;
+}
+
+// Returns SchematicSettings
+// Since 11.0
+message GetSchematicSettings
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+}
+
+// Applies the fields present in settings; they are persisted with the project on the next
+// SaveDocument.  Returns the resulting SchematicSettings.
+// Since 11.0
+message SetSchematicSettings
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+
+  SchematicSettings settings = 2;
+}
+
+
+//// Symbol fields table ////
+
+// One symbol placement, as a row of the symbol fields table
+// Since 11.0
+message SymbolFieldsRow
+{
+  kiapi.common.types.KIID id = 1;
+
+  // The sheet the placement is on
+  kiapi.common.types.SheetPath sheet_path = 2;
+
+  string reference = 3;
+
+  uint32 unit = 4;
+
+  // Every field by name, including Reference, Value, Footprint, Datasheet, Description
+  map<string, string> fields = 5;
+
+  bool excluded_from_bom = 6;
+  bool excluded_from_board = 7;
+  bool do_not_populate = 8;
+}
+
+// Lists every symbol placement with its field values, as the symbol fields table shows them.
+// Returns SymbolFieldsTableResponse
+// Since 11.0
+message GetSymbolFieldsTable
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+
+  // Restrict the fields map to these names; empty returns every field
+  repeated string fields = 2;
+
+  // Include power symbols (excluded by default, as the table does)
+  bool include_power_symbols = 3;
+}
+
+// Since 11.0
+message SymbolFieldsTableResponse
+{
+  repeated SymbolFieldsRow rows = 1;
+}
+
+// One field value to set on one placement.  Reference, Value and Footprint are set per
+// placement (sheet instance); other fields are shared by every placement of the symbol.
+// Since 11.0
+message SymbolFieldUpdate
+{
+  kiapi.common.types.KIID id = 1;
+
+  // Required for Reference/Value/Footprint on symbols that are placed more than once
+  kiapi.common.types.SheetPath sheet_path = 2;
+
+  string field = 3;
+
+  string value = 4;
+
+  // Remove the (user) field instead of setting it
+  bool remove = 5;
+}
+
+// Sets field values in bulk, as one API commit.
+// Returns SetSymbolFieldsResponse
+// Since 11.0
+message SetSymbolFields
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+
+  repeated SymbolFieldUpdate updates = 2;
+}
+
+// Since 11.0
+message SetSymbolFieldsResponse
+{
+  uint32 updated_count = 1;
+
+  // Updates that could not be applied (unknown symbol, mandatory field removal, ...)
+  repeated string errors = 2;
+}
+
+
+//// Footprint assignment ////
+
+// Since 11.0
+message FootprintAssignment
+{
+  // Reference designator (without unit suffix) of the symbol
+  string reference = 1;
+
+  kiapi.common.types.LibraryIdentifier footprint = 2;
+}
+
+// Assigns footprints to symbols by reference, as CvPcb does, in one API commit.
+// Returns AssignFootprintsResponse
+// Since 11.0
+message AssignFootprints
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+
+  repeated FootprintAssignment assignments = 2;
+}
+
+// Since 11.0
+message AssignFootprintsResponse
+{
+  uint32 assigned_count = 1;
+
+  // References that matched no symbol
+  repeated string unmatched_references = 2;
 }
