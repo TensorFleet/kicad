@@ -43,6 +43,8 @@
 #include <drc/drc_item.h>
 #include <footprint.h>
 #include <geometry/shape_compound.h>
+#include <geometry/shape_line_chain.h>
+#include <geometry/shape_segment.h>
 #include <pcb_barcode.h>
 #include <pcb_table.h>
 #include <pcb_tablecell.h>
@@ -1224,13 +1226,56 @@ BOX2I textBoxGlyphBoundingBox( const PCB_TEXTBOX* aTextBox )
 }
 
 
+/// The corners of a compound shape, without the width its strokes are drawn at.  SHAPE::BBox()
+/// grows a segment by half its width, which the points GetTextAsShapes sends do not carry.
+BOX2I compoundPointBoundingBox( const SHAPE_COMPOUND& aCompound )
+{
+    BOX2I box;
+    bool  empty = true;
+
+    auto add =
+            [&]( const VECTOR2I& aPoint )
+            {
+                if( empty )
+                {
+                    box = BOX2I( aPoint, VECTOR2I( 0, 0 ) );
+                    empty = false;
+                }
+                else
+                {
+                    box.Merge( aPoint );
+                }
+            };
+
+    for( const SHAPE* shape : aCompound.Shapes() )
+    {
+        if( const SHAPE_SEGMENT* segment = dynamic_cast<const SHAPE_SEGMENT*>( shape ) )
+        {
+            add( segment->GetSeg().A );
+            add( segment->GetSeg().B );
+        }
+        else if( const SHAPE_LINE_CHAIN* chain = dynamic_cast<const SHAPE_LINE_CHAIN*>( shape ) )
+        {
+            for( int ii = 0; ii < chain->PointCount(); ++ii )
+                add( chain->CPoint( ii ) );
+        }
+        else if( shape )
+        {
+            BOOST_TEST_MESSAGE( "unexpected shape type in the text shape" );
+        }
+    }
+
+    return box;
+}
+
+
 /// The glyphs the plotter draws: the item's own shape, laid out with the pen it plots with
 void checkGlyphsMatch( const wxString& aWhat, const BOX2I& aFromApi, const PCB_TEXTBOX* aTextBox )
 {
     PCB_TEXTBOX asPlotted( *aTextBox );
     asPlotted.SetTextThickness( aTextBox->GetEffectiveTextPenWidth() );
 
-    BOX2I expected = asPlotted.GetEffectiveTextShape( false )->BBox();
+    BOX2I expected = compoundPointBoundingBox( *asPlotted.GetEffectiveTextShape( false ) );
 
     BOOST_TEST_CONTEXT( aWhat << ": API " << aFromApi.Format() << " vs item " << expected.Format() )
     {
