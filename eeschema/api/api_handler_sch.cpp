@@ -690,6 +690,11 @@ ErcSeveritiesResponse API_HANDLER_SCH::ercSeverities() const
     {
         ERCE_T code = static_cast<ERCE_T>( item.GetErrorCode() );
 
+        // That list is what the Schematic Setup severities panel draws, so it carries the
+        // section headings too.  They have no error code and no severity to report.
+        if( code == ERCE_UNSPECIFIED )
+            continue;
+
         kiapi::schematic::ErcSeveritySetting* setting = response.add_severities();
         setting->set_rule_type( ToProtoEnum<ERCE_T, kiapi::schematic::ErcErrorType>( code ) );
         setting->set_severity( ToProtoEnum<SEVERITY, types::RuleSeverity>( settings.GetSeverity( code ) ) );

@@ -563,7 +563,16 @@ BOOST_AUTO_TEST_CASE( RunSchematicJobErcPopulatesMarkers )
 
     kiapi::schematic::commands::ErcSeveritiesResponse severities;
     handle( getSeverities, severities );
-    BOOST_CHECK_EQUAL( severities.severities_size(), static_cast<int>( ERC_ITEM::GetItemsWithSeverities().size() ) );
+    int settableRuleTypes = 0;
+
+    for( const RC_ITEM& item : ERC_ITEM::GetItemsWithSeverities() )
+    {
+        // The list carries the setup panel's section headings, which have no error code
+        if( item.GetErrorCode() != ERCE_UNSPECIFIED )
+            settableRuleTypes++;
+    }
+
+    BOOST_CHECK_EQUAL( severities.severities_size(), settableRuleTypes );
 
     kiapi::schematic::commands::SetErcSeverities setSeverities;
     *setSeverities.mutable_schematic() = makeDocument( *schematic );

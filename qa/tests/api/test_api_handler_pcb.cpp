@@ -853,7 +853,16 @@ BOOST_AUTO_TEST_CASE( DrcSeveritiesRoundTrip )
     handle( get, severities );
 
     // Every user-settable rule type is listed once
-    BOOST_CHECK_EQUAL( severities.severities_size(), static_cast<int>( DRC_ITEM::GetItemsWithSeverities().size() ) );
+    int settableRuleTypes = 0;
+
+    for( const RC_ITEM& item : DRC_ITEM::GetItemsWithSeverities() )
+    {
+        // The list carries the setup panel's section headings, which have no error code
+        if( item.GetErrorCode() != 0 )
+            settableRuleTypes++;
+    }
+
+    BOOST_CHECK_EQUAL( severities.severities_size(), settableRuleTypes );
 
     std::set<int> seen;
 

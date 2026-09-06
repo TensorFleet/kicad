@@ -2558,6 +2558,11 @@ DrcSeveritiesResponse API_HANDLER_PCB::drcSeverities() const
     {
         PCB_DRC_CODE code = static_cast<PCB_DRC_CODE>( item.GetErrorCode() );
 
+        // That list is what the Board Setup severities panel draws, so it carries the section
+        // headings too.  They have no error code and no severity to report.
+        if( code == 0 )
+            continue;
+
         board::DrcSeveritySetting* setting = response.add_severities();
         setting->set_rule_type( ToProtoEnum<PCB_DRC_CODE, board::DrcErrorType>( code ) );
         setting->set_severity( ToProtoEnum<SEVERITY, types::RuleSeverity>( bds.GetSeverity( code ) ) );
