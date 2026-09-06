@@ -224,6 +224,7 @@ BOOST_FIXTURE_TEST_CASE( BoardOpsRatsnestAndLengths, API_SERVER_E2E_FIXTURE )
         BOOST_REQUIRE_EQUAL( response.edges_size(), 1 );
         BOOST_CHECK_EQUAL( response.unrouted_count(), 1 );
         BOOST_CHECK_EQUAL( response.edges( 0 ).net().name(), "A" );
+        BOOST_CHECK_GT( response.edges( 0 ).net().code().value(), 0 );
         BOOST_CHECK( !response.edges( 0 ).source().value().empty() );
         BOOST_CHECK( !response.edges( 0 ).target().value().empty() );
         BOOST_CHECK_GT( response.edges( 0 ).length().value_nm(), 0 );

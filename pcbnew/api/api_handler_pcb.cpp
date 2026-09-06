@@ -3886,6 +3886,7 @@ HANDLER_RESULT<RatsnestResponse> API_HANDLER_PCB::handleGetRatsnest( const HANDL
                 continue;
 
             RatsnestEdge* out = response.add_edges();
+            out->mutable_net()->mutable_code()->set_value( net->GetNetCode() );
             out->mutable_net()->set_name( net->GetNetname().ToUTF8() );
             out->mutable_source()->set_value( source->Parent()->m_Uuid.AsStdString() );
             PackVector2( *out->mutable_source_position(), source->Pos() );
