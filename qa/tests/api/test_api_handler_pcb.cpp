@@ -29,6 +29,7 @@
 
 #include <api/api_enums.h>
 #include <api/api_handler_common.h>
+#include <api/api_utils.h>
 #include <api/api_handler_pcb.h>
 #include <api/headless_pcb_context.h>
 #include <api/board/board.pb.h>
@@ -42,6 +43,7 @@
 #include <drc/drc_item.h>
 #include <footprint.h>
 #include <geometry/shape_compound.h>
+#include <pcb_barcode.h>
 #include <pcb_table.h>
 #include <pcb_tablecell.h>
 #include <pcb_textbox.h>
@@ -1292,6 +1294,44 @@ BOOST_AUTO_TEST_CASE( GetTextAsShapesPlacesTextBoxes )
         BOOST_CHECK( rotated.GetCenter() != before.GetCenter() );
         break;
     }
+}
+
+
+BOOST_AUTO_TEST_CASE( BarcodeCarriesItsEncodedGeometry )
+{
+    BOARD* board = loadBoard( wxS( "api_kitchen_sink" ) );
+
+    int barcodes = 0;
+
+    for( BOARD_ITEM* item : board->Drawings() )
+    {
+        if( item->Type() != PCB_BARCODE_T )
+            continue;
+
+        PCB_BARCODE* barcode = static_cast<PCB_BARCODE*>( item );
+
+        google::protobuf::Any any;
+        barcode->Serialize( any );
+
+        kiapi::board::types::Barcode message;
+        BOOST_REQUIRE( any.UnpackTo( &message ) );
+
+        // The encoded modules come back, so a client does not need its own encoder
+        BOOST_REQUIRE_MESSAGE( message.shapes().polygons_size() > 0,
+                               "no geometry for barcode '" << message.text() << "'" );
+
+        SHAPE_POLY_SET polygons = kiapi::common::UnpackPolySet( message.shapes() );
+        BOOST_CHECK( polygons.BBox() == barcode->GetBoundingBox() );
+
+        // Deserializing ignores it: the geometry follows from the payload
+        PCB_BARCODE copy( nullptr );
+        BOOST_REQUIRE( copy.Deserialize( any ) );
+        BOOST_CHECK( copy.GetText() == barcode->GetText() );
+
+        barcodes++;
+    }
+
+    BOOST_CHECK_EQUAL( barcodes, 2 );
 }
 
 

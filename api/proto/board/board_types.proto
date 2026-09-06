@@ -625,6 +625,14 @@ message Barcode
 
   // Since: 11.0
   repeated kiapi.common.types.CustomProperty custom_properties = 16;
+
+  // The encoded symbol as KiCad plots it: the dark modules, plus the human-readable text when
+  // show_text is set, as filled polygons in board coordinates, already sized and rotated to
+  // match position, orientation, width and height.  Read-only: KiCad fills this in when it
+  // serializes a barcode and ignores it when deserializing, because the geometry follows from
+  // text, kind and error_correction.  Empty if the payload cannot be encoded.
+  // Since: 11.0
+  kiapi.common.types.PolySet shapes = 17;
 }
 
 // A board-specific text object, existing on a board layer
