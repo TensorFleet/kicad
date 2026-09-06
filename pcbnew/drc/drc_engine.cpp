@@ -929,6 +929,14 @@ void DRC_ENGINE::RunTests( EDA_UNITS aUnits, bool aReportAllTrackErrors, bool aT
             m_errorLimits[ ii ] = ERROR_LIMIT;
     }
 
+    // The test providers are process-wide singletons that every DRC_ENGINE shares, and
+    // InitEngine() binds them to whichever engine ran it last.  A second board loaded into the
+    // process (the IPC API's job handler loads its own copy of the board next to the open
+    // document) therefore steals them, and this engine's tests would run against that board,
+    // reporting violations to an engine nobody is listening to.  Claim them for this run.
+    for( DRC_TEST_PROVIDER* provider : m_testProviders )
+        provider->SetDRCEngine( this );
+
     DRC_TEST_PROVIDER::Init();
 
     m_board->IncrementTimeStamp();      // Invalidate all caches...

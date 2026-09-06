@@ -30,9 +30,12 @@
 #include "api_e2e_utils.h"
 
 #include <api/board/board_commands.pb.h>
+#include <api/board/board_jobs.pb.h>
 #include <api/board/board_types.pb.h>
+#include <api/common/commands/base_commands.pb.h>
 #include <api/common/commands/editor_commands.pb.h>
 #include <footprint.h>
+#include <wx/utils.h>
 
 using namespace kiapi::common::commands;
 using namespace kiapi::board::commands;
@@ -399,5 +402,85 @@ BOOST_FIXTURE_TEST_CASE( BoardOpsAutoplaceAndGlobalDeletion, API_SERVER_E2E_FIXT
         request.set_locked( LF_ALL );
         BOOST_REQUIRE_MESSAGE( Send( Client(), request, &response, &error ), error );
         BOOST_CHECK_EQUAL( CountItems( Client(), board, kiapi::common::types::KOT_PCB_FOOTPRINT ), 0 );
+    }
+}
+
+
+/**
+ * DRC must not run while the job registry's worker thread is busy: an asynchronous job shares
+ * the document's PROJECT, its footprint library adapter and the KiCad thread pool with the
+ * checker, which then deletes and rebuilds the board's markers underneath it.  The web app saw
+ * RunBoardJobDrc never answer at all once a session had run its asynchronous exports.
+ */
+BOOST_FIXTURE_TEST_CASE( BoardOpsDrcAfterAsyncJobs, API_SERVER_E2E_FIXTURE )
+{
+    BOOST_REQUIRE_MESSAGE( Start(), LastError() );
+
+    TEMP_BOARD_PROJECT project;
+    DocumentSpecifier  board;
+    BOOST_REQUIRE_MESSAGE( OpenKitchenSinkBoard( *this, project, &board ),
+                           "OpenDocument failed: " + Client().LastError() );
+
+    wxString error;
+
+    // Queue several asynchronous exports and do not wait for them
+    std::vector<std::string> jobIds;
+    std::vector<wxString>    outputs;
+
+    for( int i = 0; i < 4; ++i )
+    {
+        wxString   tempFile = wxFileName::CreateTempFileName( wxS( "api_drc_async_svg_" ) );
+        wxFileName outputPath( tempFile );
+        outputPath.SetExt( wxS( "svg" ) );
+        outputs.push_back( tempFile );
+        outputs.push_back( outputPath.GetFullPath() );
+
+        kiapi::board::jobs::RunBoardJobExportSvg request;
+        *request.mutable_job_settings()->mutable_document() = board;
+        request.mutable_job_settings()->set_output_path( outputPath.GetFullPath().ToUTF8().data() );
+        request.mutable_job_settings()->set_async( true );
+        request.mutable_plot_settings()->add_layers( kiapi::board::types::BL_F_Cu );
+        request.mutable_plot_settings()->add_layers( kiapi::board::types::BL_B_Cu );
+        request.mutable_plot_settings()->add_layers( kiapi::board::types::BL_Edge_Cuts );
+
+        kiapi::common::types::RunJobResponse started;
+        BOOST_REQUIRE_MESSAGE( Client().RunJob( request, &started ), "RunJob failed: " + Client().LastError() );
+        BOOST_REQUIRE_EQUAL( started.status(), kiapi::common::types::JS_RUNNING );
+        BOOST_REQUIRE( !started.job_id().empty() );
+        jobIds.push_back( started.job_id() );
+    }
+
+    // DRC answers, and only once the queue has drained
+    RunBoardJobDrc run;
+    *run.mutable_board() = board;
+
+    DrcResultsResponse results;
+    BOOST_REQUIRE_MESSAGE( Send( Client(), run, &results, &error ), error );
+    BOOST_CHECK_GT( results.markers_size(), 0 );
+
+    for( const std::string& jobId : jobIds )
+    {
+        GetJobStatus statusRequest;
+        statusRequest.set_job_id( jobId );
+
+        GetJobStatusResponse status;
+        BOOST_REQUIRE_MESSAGE( Send( Client(), statusRequest, &status, &error ), error );
+        BOOST_CHECK_EQUAL( status.state(), JOB_STATE_FINISHED );
+    }
+
+    // And the markers survive, so the client can read them back
+    GetDrcMarkers get;
+    *get.mutable_board() = board;
+
+    DrcResultsResponse after;
+    BOOST_REQUIRE_MESSAGE( Send( Client(), get, &after, &error ), error );
+    BOOST_CHECK_EQUAL( after.markers_size(), results.markers_size() );
+
+    for( const wxString& path : outputs )
+    {
+        if( wxFileName::DirExists( path ) )
+            wxFileName::Rmdir( path, wxPATH_RMDIR_RECURSIVE );
+        else if( wxFileName::FileExists( path ) )
+            wxRemoveFile( path );
     }
 }

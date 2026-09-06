@@ -19,6 +19,7 @@
  */
 
 #include <api/api_handler_sch.h>
+#include <api/api_job_registry.h>
 #include <api/api_jobs.h>
 #include <api/api_enums.h>
 #include <api/api_sch_utils.h>
@@ -556,6 +557,12 @@ HANDLER_RESULT<ErcResultsResponse> API_HANDLER_SCH::handleRunSchematicJobErc(
             return tl::unexpected( e );
         }
     }
+
+    // An asynchronous job runs on the registry's worker thread and shares this document's
+    // PROJECT, its symbol library adapter and the KiCad thread pool with the checker, which then
+    // rebuilds the schematic's markers underneath it.  Let the queue drain first, the same way a
+    // synchronous job and IFACE::closeCurrentDocument do.
+    API_JOB_REGISTRY::Instance().WaitForIdle();
 
     SCHEMATIC* sch = schematic();
 
