@@ -25,6 +25,9 @@
 #include <eda_base_frame.h>
 #include <eda_item.h>
 #include <title_block.h>
+#include <tool/action_manager.h>
+#include <tool/tool_action.h>
+#include <tool/tool_manager.h>
 #include <wx/wx.h>
 
 using namespace kiapi::common::commands;
@@ -47,6 +50,122 @@ API_HANDLER_EDITOR::API_HANDLER_EDITOR( EDA_BASE_FRAME* aFrame ) :
     registerHandler<FocusOnItem, FocusOnItemResponse>( &API_HANDLER_EDITOR::handleFocusOnItem );
     registerHandler<GetDocumentRevision, DocumentRevisionResponse>(
             &API_HANDLER_EDITOR::handleGetDocumentRevision );
+    registerHandler<RunAction, RunActionResponse>( &API_HANDLER_EDITOR::handleRunAction );
+    registerHandler<GetActions, GetActionsResponse>( &API_HANDLER_EDITOR::handleGetActions );
+}
+
+
+const std::set<std::string>& API_HANDLER_EDITOR::headlessActions() const
+{
+    static const std::set<std::string> none;
+    return none;
+}
+
+
+bool API_HANDLER_EDITOR::ownsAction( const std::string& aAction ) const
+{
+    for( const std::string& prefix : actionPrefixes() )
+    {
+        if( aAction.starts_with( prefix ) )
+            return true;
+    }
+
+    return false;
+}
+
+
+HANDLER_RESULT<RunActionResponse> API_HANDLER_EDITOR::handleRunAction( const HANDLER_CONTEXT<RunAction>& aCtx )
+{
+    const std::string& action = aCtx.Request.action();
+
+    // Another editor's action: let its handler answer
+    if( !ownsAction( action ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_UNHANDLED );
+        return tl::unexpected( e );
+    }
+
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    TOOL_MANAGER* toolMgr = editorToolManager();
+
+    RunActionResponse response;
+
+    if( !toolMgr )
+    {
+        response.set_status( RunActionStatus::RAS_FRAME_NOT_OPEN );
+        return response;
+    }
+
+    if( !m_frame )
+    {
+        // Only actions whose tools work without a window can run in kicad-cli api-server.  Unknown
+        // names are still reported through the response, as they are with a frame.
+        if( !headlessActions().contains( action ) && toolMgr->GetActionManager()->FindAction( action ) )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_UNIMPLEMENTED );
+            e.set_error_message( fmt::format( "action {} is not available in headless mode; see GetActions", action ) );
+            return tl::unexpected( e );
+        }
+
+        ensureHeadlessTools();
+    }
+
+    if( toolMgr->RunAction( action, true ) )
+    {
+        response.set_status( RunActionStatus::RAS_OK );
+
+        // A headless tool commits straight to the document; nothing else reports the change
+        if( !m_frame )
+            bumpRevision();
+    }
+    else
+    {
+        response.set_status( RunActionStatus::RAS_INVALID );
+    }
+
+    return response;
+}
+
+
+HANDLER_RESULT<GetActionsResponse> API_HANDLER_EDITOR::handleGetActions( const HANDLER_CONTEXT<GetActions>& aCtx )
+{
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.document() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    TOOL_MANAGER* toolMgr = editorToolManager();
+
+    if( !toolMgr )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "this editor has no tool actions" );
+        return tl::unexpected( e );
+    }
+
+    const std::set<std::string>& headless = headlessActions();
+    GetActionsResponse           response;
+
+    // Every TOOL_ACTION in the process is registered with every ACTION_MANAGER; list the ones
+    // that belong to this editor, in name order
+    for( const auto& [name, action] : toolMgr->GetActionManager()->GetActions() )
+    {
+        if( !ownsAction( name ) )
+            continue;
+
+        ActionInfo* info = response.add_actions();
+        info->set_name( name );
+        info->set_label( action->GetFriendlyName().ToUTF8() );
+        info->set_description( action->GetDescription().ToUTF8() );
+        info->set_headless_capable( headless.contains( name ) );
+    }
+
+    return response;
 }
 
 

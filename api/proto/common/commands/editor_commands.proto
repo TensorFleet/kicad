@@ -117,6 +117,36 @@ message RunActionResponse
   RunActionStatus status = 1;
 }
 
+// Lists the tool actions of the editor serving the given document (the names RunAction accepts).
+// Returns GetActionsResponse
+// Since 11.0
+message GetActions
+{
+  kiapi.common.types.DocumentSpecifier document = 1;
+}
+
+// Since 11.0
+message ActionInfo
+{
+  // Action name, like "pcbnew.ZoneFiller.zoneFillAll"
+  string name = 1;
+
+  // Short human-readable label (menu text)
+  string label = 2;
+
+  string description = 3;
+
+  // True if RunAction can run this action without an editor window (kicad-cli api-server).
+  // Actions that open dialogs or need a canvas are not headless-capable.
+  bool headless_capable = 4;
+}
+
+// Since 11.0
+message GetActionsResponse
+{
+  repeated ActionInfo actions = 1;
+}
+
 
 /*
  * Begins a staged set of changes.  Any modifications made to a document through the API after this

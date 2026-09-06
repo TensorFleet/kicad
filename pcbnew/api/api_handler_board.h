@@ -81,6 +81,17 @@ protected:
 
     TOOL_MANAGER* toolManager() const { return context()->GetToolManager(); }
 
+    /// Whether ensureHeadlessTools has run InitTools on the headless tool manager
+    bool m_headlessToolsInitialized = false;
+
+    TOOL_MANAGER* editorToolManager() const override { return toolManager(); }
+
+    std::vector<std::string> actionPrefixes() const override { return { "pcbnew.", "common." }; }
+
+    const std::set<std::string>& headlessActions() const override;
+
+    void ensureHeadlessTools() override;
+
     std::optional<BOARD_ITEM*> getItemById( const KIID& aId ) const;
 
     static HANDLER_RESULT<std::unique_ptr<BOARD_ITEM>> createItemForType( KICAD_T aType,
@@ -97,9 +108,6 @@ protected:
             const google::protobuf::RepeatedField<int>& aTypes );
 
 private:
-    HANDLER_RESULT<commands::RunActionResponse> handleRunAction(
-            const HANDLER_CONTEXT<commands::RunAction>& aCtx );
-
     HANDLER_RESULT<commands::GetItemsResponse> handleGetItemsById(
             const HANDLER_CONTEXT<commands::GetItemsById>& aCtx );
 

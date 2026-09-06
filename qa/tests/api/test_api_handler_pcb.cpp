@@ -40,6 +40,7 @@
 #include <board.h>
 #include <drc/drc_item.h>
 #include <footprint.h>
+#include <pcb_track.h>
 #include <board_design_settings.h>
 #include <board_stackup_manager/board_stackup.h>
 #include <connectivity/connectivity_data.h>
@@ -935,6 +936,95 @@ BOOST_AUTO_TEST_CASE( ParseAndCreateItemsFromStringPastesCopies )
     BOOST_REQUIRE( !result.has_value() );
     BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_BAD_REQUEST );
     BOOST_CHECK_EQUAL( board->Footprints().size(), footprintsBefore + 1 );
+}
+
+
+// Since 11.0: GetActions lists the board editor's actions and which of them run headless;
+// RunAction runs those on the headless tool manager and refuses the others cleanly.
+BOOST_AUTO_TEST_CASE( GetActionsAndHeadlessRunAction )
+{
+    BOARD* board = loadBoard( wxS( "api_kitchen_sink" ) );
+
+    API_HANDLER_PCB handler( m_context );
+
+    auto handle = [&]( const auto& aCommand, auto& aResponse )
+    {
+        kiapi::common::ApiRequest request = makeRequest( aCommand );
+        API_RESULT                result = handler.Handle( request );
+
+        BOOST_REQUIRE_MESSAGE( result.has_value(), "request failed: " << result.error().error_message() );
+        BOOST_REQUIRE( result->message().UnpackTo( &aResponse ) );
+    };
+
+    kiapi::common::commands::GetActions getActions;
+    *getActions.mutable_document() = pcbDocument( board );
+
+    kiapi::common::commands::GetActionsResponse actions;
+    handle( getActions, actions );
+    BOOST_REQUIRE_GT( actions.actions_size(), 0 );
+
+    std::map<std::string, kiapi::common::commands::ActionInfo> byName;
+
+    for( const kiapi::common::commands::ActionInfo& info : actions.actions() )
+    {
+        BOOST_CHECK( info.name().starts_with( "pcbnew." ) || info.name().starts_with( "common." ) );
+        byName[info.name()] = info;
+    }
+
+    BOOST_REQUIRE( byName.contains( "pcbnew.GlobalEdit.cleanupTracksAndVias" ) );
+    BOOST_CHECK( byName["pcbnew.GlobalEdit.cleanupTracksAndVias"].headless_capable() );
+    BOOST_CHECK( !byName["pcbnew.GlobalEdit.cleanupTracksAndVias"].label().empty() );
+    BOOST_REQUIRE( byName.contains( "pcbnew.EditorControl.boardSetup" ) );
+    BOOST_CHECK( !byName["pcbnew.EditorControl.boardSetup"].headless_capable() );
+
+    // A schematic document is another handler's business
+    getActions.mutable_document()->set_type( kiapi::common::types::DOCTYPE_SCHEMATIC );
+    kiapi::common::ApiRequest request = makeRequest( getActions );
+    API_RESULT                result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_UNHANDLED );
+
+    // A duplicate track gives the cleanup something to remove
+    BOOST_REQUIRE( !board->Tracks().empty() );
+    size_t     tracksBefore = board->Tracks().size();
+    PCB_TRACK* duplicate = static_cast<PCB_TRACK*>( board->Tracks()[0]->Duplicate( IGNORE_PARENT_GROUP ) );
+    board->Add( duplicate );
+    BOOST_REQUIRE_EQUAL( board->Tracks().size(), tracksBefore + 1 );
+
+    kiapi::common::commands::GetDocumentRevision getRevision;
+    *getRevision.mutable_document() = pcbDocument( board );
+    kiapi::common::commands::DocumentRevisionResponse revisionBefore, revisionAfter;
+    handle( getRevision, revisionBefore );
+
+    kiapi::common::commands::RunAction run;
+    run.set_action( "pcbnew.GlobalEdit.cleanupTracksAndVias" );
+
+    kiapi::common::commands::RunActionResponse runResponse;
+    handle( run, runResponse );
+    BOOST_CHECK_EQUAL( runResponse.status(), kiapi::common::commands::RAS_OK );
+    BOOST_CHECK_LT( board->Tracks().size(), tracksBefore + 1 );
+
+    handle( getRevision, revisionAfter );
+    BOOST_CHECK_GT( revisionAfter.revision(), revisionBefore.revision() );
+
+    // Unknown name: reported in the response
+    run.set_action( "pcbnew.GlobalEdit.noSuchAction" );
+    handle( run, runResponse );
+    BOOST_CHECK_EQUAL( runResponse.status(), kiapi::common::commands::RAS_INVALID );
+
+    // A dialog-driven action cannot run headless
+    run.set_action( "pcbnew.EditorControl.boardSetup" );
+    request = makeRequest( run );
+    result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_UNIMPLEMENTED );
+
+    // Another editor's action is passed on
+    run.set_action( "eeschema.EditorControl.annotate" );
+    request = makeRequest( run );
+    result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_UNHANDLED );
 }
 
 
