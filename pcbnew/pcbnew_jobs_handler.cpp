@@ -51,6 +51,7 @@
 #include <jobs/job_fp_upgrade.h>
 #include <jobs/job_export_pcb_ipc2581.h>
 #include <jobs/job_export_pcb_ipcd356.h>
+#include <jobs/job_export_pcb_specctra.h>
 #include <jobs/job_export_pcb_odb.h>
 #include <jobs/job_export_pcb_gerber.h>
 #include <jobs/job_export_pcb_gerbers.h>
@@ -94,6 +95,7 @@
 #include <project/project_file.h>
 #include <exporters/export_gencad_writer.h>
 #include <exporters/export_d356.h>
+#include <specctra_import_export/specctra.h>
 #include <kiface_ids.h>
 #include <netlist_reader/pcb_netlist.h>
 #include <netlist_reader/netlist_reader.h>
@@ -437,6 +439,11 @@ PCBNEW_JOBS_HANDLER::PCBNEW_JOBS_HANDLER( KIWAY* aKiway ) :
                   return dlg.ShowModal() == wxID_OK;
               } );
     Register( "ipcd356", std::bind( &PCBNEW_JOBS_HANDLER::JobExportIpcD356, this, std::placeholders::_1 ),
+              []( JOB* job, wxWindow* aParent ) -> bool
+              {
+                  return true;
+              } );
+    Register( "specctra", std::bind( &PCBNEW_JOBS_HANDLER::JobExportSpecctra, this, std::placeholders::_1 ),
               []( JOB* job, wxWindow* aParent ) -> bool
               {
                   return true;
@@ -3199,6 +3206,53 @@ int PCBNEW_JOBS_HANDLER::JobExportIpcD356( JOB* aJob )
         m_reporter->Report( _( "Failed to create IPC-D-356 file\n" ), RPT_SEVERITY_ERROR );
         return CLI::EXIT_CODES::ERR_INVALID_OUTPUT_CONFLICT;
     }
+}
+
+
+int PCBNEW_JOBS_HANDLER::JobExportSpecctra( JOB* aJob )
+{
+    JOB_EXPORT_PCB_SPECCTRA* job = dynamic_cast<JOB_EXPORT_PCB_SPECCTRA*>( aJob );
+
+    if( job == nullptr )
+        return CLI::EXIT_CODES::ERR_UNKNOWN;
+
+    BOARD* brd = getBoard( job->m_filename );
+
+    if( !brd )
+        return CLI::EXIT_CODES::ERR_INVALID_INPUT_FILE;
+
+    if( job->GetConfiguredOutputPath().IsEmpty() )
+    {
+        wxFileName fn = brd->GetFileName();
+        fn.SetName( fn.GetName() );
+        fn.SetExt( FILEEXT::SpecctraDsnFileExtension );
+
+        job->SetWorkingOutputPath( fn.GetFullName() );
+    }
+
+    wxString outPath = resolveJobOutputPath( aJob, brd );
+
+    if( !PATHS::EnsurePathExists( outPath, true ) )
+    {
+        m_reporter->Report( _( "Failed to create output directory\n" ), RPT_SEVERITY_ERROR );
+        return CLI::EXIT_CODES::ERR_INVALID_OUTPUT_CONFLICT;
+    }
+
+    try
+    {
+        // Flips the back-side footprints while it writes and flips them back afterwards
+        DSN::ExportBoardToSpecctraFile( brd, outPath );
+    }
+    catch( const IO_ERROR& ioe )
+    {
+        m_reporter->Report( wxString::Format( _( "Failed to create Specctra DSN file: %s\n" ), ioe.What() ),
+                            RPT_SEVERITY_ERROR );
+        return CLI::EXIT_CODES::ERR_INVALID_OUTPUT_CONFLICT;
+    }
+
+    aJob->AddOutput( outPath );
+    m_reporter->Report( _( "Successfully created Specctra DSN file\n" ), RPT_SEVERITY_INFO );
+    return CLI::EXIT_CODES::SUCCESS;
 }
 
 
