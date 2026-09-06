@@ -241,6 +241,44 @@ BOOST_AUTO_TEST_CASE( DispatchTriesHandlersInRegistrationOrder )
 }
 
 
+// Since 11.0: GetOpenDocuments for an editor that is not running answers an empty list
+BOOST_AUTO_TEST_CASE( GetOpenDocumentsAnswersEmptyWithoutEditor )
+{
+    m_server.RegisterHandler( &m_commonHandler );
+
+    kiapi::common::commands::GetOpenDocuments command;
+    command.set_type( kiapi::common::types::DOCTYPE_PCB );
+
+    kiapi::common::ApiRequest request;
+    request.mutable_header()->set_client_name( "kicad.qa" );
+    request.mutable_message()->PackFrom( command );
+
+    API_RESULT result = m_server.Dispatch( request );
+    BOOST_REQUIRE_MESSAGE( result.has_value(), result.error().error_message() );
+
+    kiapi::common::commands::GetOpenDocumentsResponse response;
+    BOOST_REQUIRE( result->message().UnpackTo( &response ) );
+    BOOST_CHECK_EQUAL( response.documents_size(), 0 );
+
+    // The fallback is advertised so that clients can rely on it
+    std::map<std::string, SupportedCommand> commands = byTypeUrl( m_server.SupportedCommands() );
+    BOOST_CHECK( commands.contains( typeUrl( command ) ) );
+
+    // Once a board is open, its handler answers instead
+    loadBoard( wxS( "issue5830" ) );
+    API_HANDLER_PCB pcbHandler( m_context );
+    m_server.RegisterHandler( &pcbHandler );
+
+    result = m_server.Dispatch( request );
+    BOOST_REQUIRE_MESSAGE( result.has_value(), result.error().error_message() );
+    BOOST_REQUIRE( result->message().UnpackTo( &response ) );
+    BOOST_CHECK_EQUAL( response.documents_size(), 1 );
+
+    m_server.DeregisterHandler( &pcbHandler );
+    m_server.DeregisterHandler( &m_commonHandler );
+}
+
+
 // Without a request the wait times out; nothing else can signal it in a socket-less server
 BOOST_AUTO_TEST_CASE( WaitForRequestTimesOutWhenIdle )
 {

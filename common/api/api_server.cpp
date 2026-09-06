@@ -38,6 +38,7 @@
 #include <settings/common_settings.h>
 #include <string_utils.h>
 
+#include <api/common/commands/editor_commands.pb.h>
 #include <api/common/envelope.pb.h>
 
 #ifdef __UNIX__
@@ -48,6 +49,7 @@ using kiapi::common::ApiRequest, kiapi::common::ApiResponse, kiapi::common::ApiS
 using kiapi::common::commands::GetSupportedCommands, kiapi::common::commands::GetSupportedCommandsResponse;
 using kiapi::common::commands::SupportedCommand;
 using kiapi::common::commands::GetServerInfo, kiapi::common::commands::GetServerInfoResponse;
+using kiapi::common::commands::GetOpenDocuments, kiapi::common::commands::GetOpenDocumentsResponse;
 
 
 /**
@@ -82,6 +84,27 @@ private:
 };
 
 
+/**
+ * Answers commands that no registered handler claimed, for commands whose "nothing to report"
+ * answer is a success rather than AS_UNHANDLED.  Consulted after every registered handler.
+ */
+class API_HANDLER_FALLBACK : public API_HANDLER
+{
+public:
+    API_HANDLER_FALLBACK() : API_HANDLER()
+    {
+        registerHandler<GetOpenDocuments, GetOpenDocumentsResponse>( &API_HANDLER_FALLBACK::handleGetOpenDocuments );
+    }
+
+private:
+    /// No editor of the requested type is open: an empty list rather than "no handler available"
+    HANDLER_RESULT<GetOpenDocumentsResponse> handleGetOpenDocuments( const HANDLER_CONTEXT<GetOpenDocuments>& aCtx )
+    {
+        return GetOpenDocumentsResponse();
+    }
+};
+
+
 wxString KICAD_API_SERVER::s_logFileName = "api.log";
 
 
@@ -91,6 +114,7 @@ wxDEFINE_EVENT( API_REQUEST_EVENT, wxCommandEvent );
 KICAD_API_SERVER::KICAD_API_SERVER( bool aAutoStart ) :
         wxEvtHandler(),
         m_serverHandler( std::make_unique<API_HANDLER_SERVER>( this ) ),
+        m_fallbackHandler( std::make_unique<API_HANDLER_FALLBACK>() ),
         m_eventSequence( 0 ),
         m_token( KIID().AsStdString() ),
         m_readyToReply( false ),
@@ -98,6 +122,7 @@ KICAD_API_SERVER::KICAD_API_SERVER( bool aAutoStart ) :
 {
     m_handlers.push_back( m_serverHandler.get() );
     m_serverHandler->attachServer( this );
+    m_fallbackHandler->attachServer( this );
 
     if( !aAutoStart )
         return;
@@ -353,7 +378,10 @@ GetSupportedCommandsResponse KICAD_API_SERVER::SupportedCommands() const
     // GetOpenDocuments in both the board and schematic handlers) is reported once, sorted.
     std::map<std::string, SupportedCommand> commands;
 
-    for( API_HANDLER* handler : m_handlers )
+    std::vector<API_HANDLER*> handlers = m_handlers;
+    handlers.push_back( m_fallbackHandler.get() );
+
+    for( API_HANDLER* handler : handlers )
     {
         for( const API_HANDLER::SUPPORTED_COMMAND& cmd : handler->SupportedCommands() )
         {
@@ -528,6 +556,9 @@ API_RESULT KICAD_API_SERVER::Dispatch( ApiRequest& aRequest )
         else if( result.error().status() != ApiStatusCode::AS_UNHANDLED )
             break;
     }
+
+    if( !result.has_value() && result.error().status() == ApiStatusCode::AS_UNHANDLED )
+        result = m_fallbackHandler->Handle( aRequest );
 
     return result;
 }
