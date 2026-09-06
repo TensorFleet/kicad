@@ -4237,10 +4237,15 @@ HANDLER_RESULT<SetTeardropsResponse> API_HANDLER_PCB::handleSetTeardrops( const 
                         return;
                 }
 
+                const TEARDROP_PARAMETERS before = aItem->GetTeardropParams();
+
                 commit->Modify( aItem );
                 apply( aItem->GetTeardropParams(),
                        TEARDROP_MANAGER::IsUniformlyRound( aItem ) ? TARGET_ROUND : TARGET_RECT );
-                response.set_item_count( response.item_count() + 1 );
+
+                // Report what actually changed, so that removing teardrops twice reports zero
+                if( aItem->GetTeardropParams() != before )
+                    response.set_item_count( response.item_count() + 1 );
             };
 
     if( !req.items().empty() )

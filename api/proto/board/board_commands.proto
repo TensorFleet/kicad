@@ -925,7 +925,9 @@ message SetTeardrops
 // Since 11.0
 message SetTeardropsResponse
 {
-  // Pads and vias whose teardrop settings changed
+  // Pads and vias whose teardrop settings the request actually changed.  Items that already had
+  // the requested settings are not counted, so removing teardrops from a board that has none
+  // reports zero.  Track-to-track teardrops are not counted here.
   uint32 item_count = 1;
 }
 
