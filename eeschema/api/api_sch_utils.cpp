@@ -50,6 +50,8 @@
 #include <api/api_utils.h>
 #include <api/api_enums.h>
 
+#include <google/protobuf/util/message_differencer.h>
+
 
 using namespace kiapi::common;
 
@@ -275,6 +277,62 @@ bool UnpackSymbol( SCH_SYMBOL* aOutput, const kiapi::schematic::types::Schematic
 
     aOutput->SetPinMapOverride( aInput.has_pin_map_override() ? UnpackPinMapOverride( aInput.pin_map_override() )
                                                               : PIN_MAP_INSTANCE_OVERRIDE() );
+
+    return true;
+}
+
+
+bool ReuseUnchangedLibSymbol( SCH_SYMBOL* aTarget, SCH_SYMBOL* aExisting,
+                              const kiapi::schematic::types::SchematicSymbolInstance& aInput,
+                              const SCH_SHEET_PATH& aPath )
+{
+    using namespace kiapi::schematic::types;
+
+    wxCHECK( aTarget && aExisting, false );
+
+    const std::unique_ptr<LIB_SYMBOL>& existingLib = aExisting->GetLibSymbolRef();
+
+    if( !existingLib )
+        return false;
+
+    SchematicSymbolInstance existingPacked;
+
+    if( !PackSymbol( &existingPacked, aExisting, aPath ) )
+        return false;
+
+    if( !google::protobuf::util::MessageDifferencer::Equals( existingPacked.definition(), aInput.definition() ) )
+        return false;
+
+    // The pins aTarget unpacked keep their ids; UpdatePins (called by SetLibSymbol) re-links them
+    // to the copied library pins by number
+    aTarget->SetLibSymbol( new LIB_SYMBOL( *existingLib ) );
+
+    // Instance-level settings that live on the library symbol, as SCH_SYMBOL::Deserialize applied
+    // them to the rebuilt definition
+    aTarget->SetShowPinNames( aInput.show_pin_names() );
+    aTarget->SetShowPinNumbers( aInput.show_pin_numbers() );
+    aTarget->SetPinNameOffset( kiapi::common::UnpackDistance( aInput.pin_name_offset(), schIUScale ) );
+
+    // Pins are written in the order they are held, so restore the existing order (the message
+    // lists them sorted by id)
+    std::map<KIID, size_t> order;
+
+    for( const std::unique_ptr<SCH_PIN>& pin : aExisting->GetRawPins() )
+        order.emplace( pin->m_Uuid, order.size() );
+
+    std::vector<std::unique_ptr<SCH_PIN>>& pins = aTarget->GetRawPins();
+
+    std::stable_sort( pins.begin(), pins.end(),
+                      [&]( const std::unique_ptr<SCH_PIN>& a, const std::unique_ptr<SCH_PIN>& b )
+                      {
+                          auto ia = order.find( a->m_Uuid );
+                          auto ib = order.find( b->m_Uuid );
+                          size_t ka = ia == order.end() ? order.size() : ia->second;
+                          size_t kb = ib == order.end() ? order.size() : ib->second;
+                          return ka < kb;
+                      } );
+
+    aTarget->UpdatePins();
 
     return true;
 }

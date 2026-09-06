@@ -184,6 +184,118 @@ BOOST_AUTO_TEST_CASE( FootprintExcludeFromSimulationRoundTrip )
 }
 
 
+// Since 11.0: the values the file format is written from (footprint-relative text angle,
+// library-frame shape geometry, text box border stroke, zone lock, net tie group text) survive an
+// unchanged Serialize / Deserialize, not only the values the API reports.
+BOOST_AUTO_TEST_CASE( FileFormatStateRoundTrip )
+{
+    BOARD board;
+
+    // Text in a rotated footprint keeps its footprint-relative angle
+    {
+        FOOTPRINT footprint( &board );
+        footprint.SetOrientationDegrees( 90.0 );
+
+        PCB_TEXT* text = new PCB_TEXT( &footprint );
+        text->SetText( wxS( "angle" ) );
+        text->SetTextAngleDegrees( 45.0 );
+        footprint.Add( text );
+
+        google::protobuf::Any any;
+        text->Serialize( any );
+
+        PCB_TEXT copy( &footprint );
+        BOOST_REQUIRE( copy.Deserialize( any ) );
+        BOOST_CHECK_EQUAL( copy.GetTextAngle().AsDegrees(), 45.0 );
+        BOOST_CHECK_EQUAL( copy.GetLibTextAngle().AsDegrees(), text->GetLibTextAngle().AsDegrees() );
+    }
+
+    // A board-level text keeps its rotation
+    {
+        PCB_TEXT text( &board );
+        text.SetTextAngleDegrees( 45.0 );
+
+        google::protobuf::Any any;
+        text.Serialize( any );
+
+        PCB_TEXT copy( &board );
+        BOOST_REQUIRE( copy.Deserialize( any ) );
+        BOOST_CHECK_EQUAL( copy.GetTextAngle().AsDegrees(), 45.0 );
+    }
+
+    // Arc geometry reaches the library-frame copy the writer uses
+    {
+        PCB_SHAPE arc( &board, SHAPE_T::ARC );
+        arc.SetArcGeometry( VECTOR2I( 1000000, 0 ), VECTOR2I( 707107, 707107 ), VECTOR2I( 0, 1000000 ) );
+
+        google::protobuf::Any any;
+        arc.Serialize( any );
+
+        PCB_SHAPE copy( &board );
+        BOOST_REQUIRE( copy.Deserialize( any ) );
+        BOOST_CHECK( copy.GetLibraryStart() == arc.GetLibraryStart() );
+        BOOST_CHECK( copy.GetLibraryEnd() == arc.GetLibraryEnd() );
+        BOOST_CHECK( copy.GetLibraryArcMid() == arc.GetLibraryArcMid() );
+        BOOST_CHECK( copy.GetLibraryStart() != VECTOR2I( 0, 0 ) );
+    }
+
+    // The text box border stroke is part of the message
+    {
+        PCB_TEXTBOX textbox( &board );
+        textbox.SetStroke( STROKE_PARAMS( 150000, LINE_STYLE::DASH ) );
+        textbox.SetBorderEnabled( true );
+
+        google::protobuf::Any any;
+        textbox.Serialize( any );
+
+        PCB_TEXTBOX copy( &board );
+        BOOST_REQUIRE( copy.Deserialize( any ) );
+        BOOST_CHECK_EQUAL( copy.GetStroke().GetWidth(), 150000 );
+        BOOST_CHECK( copy.GetStroke().GetLineStyle() == LINE_STYLE::DASH );
+    }
+
+    // Zones carry their lock state
+    {
+        ZONE zone( &board );
+        zone.SetLocked( true );
+        zone.AppendCorner( VECTOR2I( 0, 0 ), -1 );
+        zone.AppendCorner( VECTOR2I( 1000000, 0 ), -1 );
+        zone.AppendCorner( VECTOR2I( 1000000, 1000000 ), -1 );
+
+        google::protobuf::Any any;
+        zone.Serialize( any );
+
+        ZONE copy( &board );
+        BOOST_REQUIRE( copy.Deserialize( any ) );
+        BOOST_CHECK( copy.IsLocked() );
+    }
+
+    // Net tie groups keep their text; a changed pad list is written in KiCad's usual form
+    {
+        FOOTPRINT footprint( &board );
+        footprint.AddNetTiePadGroup( wxS( "1,2" ) );
+
+        google::protobuf::Any any;
+        footprint.Serialize( any );
+
+        FOOTPRINT copy( &board );
+        BOOST_REQUIRE( copy.Deserialize( any ) );
+        BOOST_REQUIRE_EQUAL( copy.GetNetTiePadGroups().size(), 1 );
+        BOOST_CHECK_EQUAL( copy.GetNetTiePadGroups()[0].ToStdString(), "1,2" );
+
+        kiapi::board::types::FootprintInstance proto;
+        BOOST_REQUIRE( any.UnpackTo( &proto ) );
+        proto.mutable_definition()->mutable_net_ties( 0 )->add_pad_number( "3" );
+        any.PackFrom( proto );
+
+        FOOTPRINT edited( &board );
+        BOOST_REQUIRE( edited.Deserialize( any ) );
+        BOOST_REQUIRE_EQUAL( edited.GetNetTiePadGroups().size(), 1 );
+        BOOST_CHECK_EQUAL( edited.GetNetTiePadGroups()[0].ToStdString(), "1, 2, 3" );
+    }
+}
+
+
 BOOST_FIXTURE_TEST_CASE( Padstacks, PROTO_TEST_FIXTURE )
 {
     KI_TEST::LoadBoard( m_settingsManager, "padstacks", m_board );

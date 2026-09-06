@@ -345,6 +345,7 @@ void PCB_DIMENSION_BASE::Serialize( google::protobuf::Any &aContainer ) const
 
     types::Text* text = dimension.mutable_text();
     text->set_text( GetValueText() );
+    text->mutable_attributes()->mutable_angle()->set_value_degrees( GetTextAngle().AsDegrees() );
 
     dimension.set_override_text_enabled( m_overrideTextEnabled );
     dimension.set_override_text( m_valueString.ToUTF8() );
@@ -408,6 +409,10 @@ bool PCB_DIMENSION_BASE::Deserialize( const google::protobuf::Any &aContainer )
     SetKeepTextAligned( dimension.keep_text_aligned() );
 
     kiapi::common::UnpackCustomProperties( dimension.custom_properties(), *this );
+
+    // Sync the footprint-relative angle copy (see PCB_TEXT::Deserialize).  Done after the text
+    // position mode is known: the setter triggers Update(), which moves automatic text.
+    SetTextAngle( GetAttributes().m_Angle );
 
     Update();
 

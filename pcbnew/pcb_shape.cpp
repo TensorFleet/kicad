@@ -280,6 +280,10 @@ bool PCB_SHAPE::Deserialize( const google::protobuf::Any &aContainer )
 
     EDA_SHAPE::Deserialize( msg.shape(), pcbIUScale );
 
+    // EDA_SHAPE sets the board-frame geometry; the file format and footprint transforms work
+    // from the library-frame copy (arcs in particular bypass the syncing setters)
+    syncLibCoords();
+
     if( msg.has_solder_mask() )
     {
         SetHasSolderMask( msg.solder_mask().expose_copper() );

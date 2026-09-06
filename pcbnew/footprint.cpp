@@ -529,6 +529,8 @@ void FOOTPRINT::Serialize( google::protobuf::Any &aContainer ) const
 
         while( tokenizer.HasMoreTokens() )
             netTie->add_pad_number( tokenizer.GetNextToken().ToUTF8() );
+
+        netTie->set_group( group.ToUTF8() );
     }
 
     for( PCB_LAYER_ID layer : GetPrivateLayers().Seq() )
@@ -733,13 +735,38 @@ bool FOOTPRINT::Deserialize( const google::protobuf::Any &aContainer )
 
     for( const types::NetTieDefinition& netTieMsg : footprint.definition().net_ties() )
     {
-        wxString group;
+        std::vector<wxString> pads;
 
         for( const std::string& pad : netTieMsg.pad_number() )
-            group.Append( wxString::Format( wxT( "%s, " ), pad ) );
+            pads.emplace_back( wxString::FromUTF8( pad ) );
 
-        group.Trim();
-        AddNetTiePadGroup( group.BeforeLast( ',' ) );
+        // Keep the text as written if it still names the same pads; otherwise the pad list is
+        // authoritative and is written in KiCad's usual form
+        wxString          original = wxString::FromUTF8( netTieMsg.group() );
+        wxStringTokenizer tokenizer( original, ", \t\r\n", wxTOKEN_STRTOK );
+        std::vector<wxString> originalPads;
+
+        while( tokenizer.HasMoreTokens() )
+            originalPads.push_back( tokenizer.GetNextToken() );
+
+        if( !original.IsEmpty() && originalPads == pads )
+        {
+            AddNetTiePadGroup( original );
+            continue;
+        }
+
+        wxString group;
+
+        for( const wxString& pad : pads )
+        {
+            if( !group.IsEmpty() )
+                group += wxS( ", " );
+
+            group += pad;
+        }
+
+        if( !group.IsEmpty() )
+            AddNetTiePadGroup( group );
     }
 
     SetDuplicatePadNumbersAreJumpers( footprint.definition().jumpers().duplicate_names_are_jumpered() );

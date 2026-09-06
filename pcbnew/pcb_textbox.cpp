@@ -90,6 +90,7 @@ void PCB_TEXTBOX::Serialize( kiapi::board::types::BoardTextBox& boardText ) cons
     kiapi::common::PackTextAttributes( *text.mutable_attributes(), GetAttributes() );
 
     text.set_border_enabled( IsBorderEnabled() );
+    kiapi::common::PackStroke( *boardText.mutable_border_stroke(), GetStroke(), pcbIUScale );
     text.mutable_margin_left()->set_value_nm( GetMarginLeft() );
     text.mutable_margin_top()->set_value_nm( GetMarginTop() );
     text.mutable_margin_right()->set_value_nm( GetMarginRight() );
@@ -149,6 +150,14 @@ bool PCB_TEXTBOX::Deserialize( const kiapi::board::types::BoardTextBox& boardTex
         SetMarginBottom( text.margin_bottom().value_nm() );
 
     SetBorderEnabled( text.border_enabled() );
+
+    if( boardText.has_border_stroke() )
+    {
+        STROKE_PARAMS stroke = GetStroke();
+        kiapi::common::UnpackStroke( stroke, boardText.border_stroke(), pcbIUScale );
+        SetStroke( stroke );
+    }
+
     SetIsKnockout( boardText.knockout() );
 
     kiapi::common::UnpackCustomProperties( boardText.custom_properties(), *this );

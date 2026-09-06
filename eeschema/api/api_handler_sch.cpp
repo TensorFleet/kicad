@@ -1461,6 +1461,14 @@ HANDLER_RESULT<ItemRequestStatus> API_HANDLER_SCH::handleCreateUpdateItemsIntern
             else if( existingItem->Type() == SCH_SHEET_T )
                 sheetPlacements = static_cast<SCH_SHEET*>( existingItem )->GetInstances();
 
+            // An unchanged library definition keeps the library symbol the sheet already has, so
+            // that the lib_symbols cache is not rewritten under a new name
+            if( existingItem->Type() == SCH_SYMBOL_T )
+            {
+                ReuseUnchangedLibSymbol( static_cast<SCH_SYMBOL*>( item.get() ),
+                                         static_cast<SCH_SYMBOL*>( existingItem ), symbolProto, existingPath );
+            }
+
             commit->Modify( existingItem, targetScreen );
             existingItem->SwapItemData( static_cast<SCH_ITEM*>( item.get() ) );
 

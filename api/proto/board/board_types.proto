@@ -663,6 +663,10 @@ message BoardTextBox
 
   // Since: 11.0
   repeated kiapi.common.types.CustomProperty custom_properties = 7;
+
+  // The stroke of the border drawn around the text box (used when textbox.border_enabled is set)
+  // Since: 11.0
+  kiapi.common.types.StrokeAttributes border_stroke = 8;
 }
 
 // NOTE: There has been some discussion about what to do with pad attributes and properties.
@@ -1407,6 +1411,12 @@ message FootprintVariant
 message NetTieDefinition
 {
   repeated string pad_number = 1;
+
+  // The group as written in the footprint: pad numbers separated by commas and/or whitespace.
+  // Set by KiCad when serializing; when deserializing it is used verbatim if it names the same
+  // pads as pad_number, so that an unchanged footprint round-trips its file text exactly.
+  // Since: 11.0
+  string group = 2;
 }
 
 message FootprintDesignRuleOverrides

@@ -127,6 +127,9 @@ void PCB_TEXT::Serialize( kiapi::board::types::BoardText& boardText ) const
 
     PackVector2( *text->mutable_position(), GetPosition() );
 
+    // The angle is kept relative to the parent footprint; GetTextAngle() resolves it
+    text->mutable_attributes()->mutable_angle()->set_value_degrees( GetTextAngle().AsDegrees() );
+
     if( FOOTPRINT* parent = GetParentFootprint() )
         boardText.mutable_parent()->set_value( parent->m_Uuid.AsStdString() );
     else if( const BOARD* board = GetBoard() )
@@ -158,6 +161,10 @@ bool PCB_TEXT::Deserialize( const kiapi::board::types::BoardText& boardText )
     const types::Text& text = boardText.text();
 
     SetPosition( UnpackVector2( text.position() ) );
+
+    // EDA_TEXT only stored the attributes; the footprint-relative copy of the angle that the
+    // file format and footprint transforms use is maintained by the setter
+    SetTextAngle( GetAttributes().m_Angle );
     kiapi::common::UnpackCustomProperties( boardText.custom_properties(), *this );
 
     return true;
