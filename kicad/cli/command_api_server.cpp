@@ -18,9 +18,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <csignal>
-#include <atomic>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <csignal>
 #include <vector>
 
 #include <api/api_handler_common.h>
@@ -493,10 +494,13 @@ int CLI::API_SERVER_COMMAND::doPerform( KIWAY& aKiway )
 
     g_apiServerExitRequested.store( false );
 
+    // There is no wx event loop in kicad-cli, so requests queued by the server thread are pumped
+    // by hand.  Block until one arrives instead of polling: the timeout only bounds how long a
+    // SIGINT/SIGTERM (which merely sets a flag) waits to be noticed.
     while( !g_apiServerExitRequested.load() )
     {
+        server->WaitForRequest( std::chrono::milliseconds( 100 ) );
         wxTheApp->ProcessPendingEvents();
-        wxMilliSleep( 10 );
     }
 
     std::signal( SIGINT, oldSigInt );

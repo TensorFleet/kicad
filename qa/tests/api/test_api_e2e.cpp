@@ -19,6 +19,8 @@
 
 #include <utility>
 
+#include <chrono>
+
 #include <boost/test/unit_test.hpp>
 #include <wx/filefn.h>
 #include <wx/filename.h>
@@ -175,6 +177,34 @@ BOOST_FIXTURE_TEST_CASE( ServerStartsAndResponds, API_SERVER_E2E_FIXTURE )
     BOOST_REQUIRE_MESSAGE( Start(), LastError() );
 
     BOOST_CHECK_MESSAGE( Client().GetVersion(), "GetVersion failed: " + Client().LastError() );
+}
+
+
+// kicad-cli api-server used to poll for requests every 10 ms, so every round trip cost ~11 ms.
+// The server thread now wakes the main loop directly; a Ping should take well under a
+// millisecond, so even a loaded CI machine stays far below this bound.
+BOOST_FIXTURE_TEST_CASE( PingRoundTripIsNotThrottled, API_SERVER_E2E_FIXTURE )
+{
+    BOOST_REQUIRE_MESSAGE( Start(), LastError() );
+
+    constexpr int pings = 50;
+
+    // Warm up
+    BOOST_REQUIRE( Client().Ping() );
+
+    auto start = std::chrono::steady_clock::now();
+
+    for( int i = 0; i < pings; ++i )
+    {
+        kiapi::common::ApiStatusCode status = kiapi::common::AS_UNKNOWN;
+        BOOST_REQUIRE( Client().Ping( &status ) );
+        BOOST_REQUIRE_EQUAL( status, kiapi::common::AS_OK );
+    }
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - start );
+
+    BOOST_CHECK_MESSAGE( elapsed.count() < pings * 5,
+                         pings << " pings took " << elapsed.count() << " ms; the request loop appears to be polling" );
 }
 
 
