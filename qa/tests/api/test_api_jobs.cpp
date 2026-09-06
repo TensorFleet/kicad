@@ -421,6 +421,70 @@ BOOST_FIXTURE_TEST_CASE( ExportSchematicBom, API_SERVER_E2E_FIXTURE )
 }
 
 
+// Since 11.0: a request that names neither a preset nor any field exports the columns
+// `kicad-cli sch export bom` defaults to, rather than a BOM with no columns at all
+BOOST_FIXTURE_TEST_CASE( ExportSchematicBomWithoutFieldSettings, API_SERVER_E2E_FIXTURE )
+{
+    BOOST_REQUIRE_MESSAGE( Start(), LastError() );
+
+    wxString testDataDir = wxString::FromUTF8( KI_TEST::GetTestDataRootDir() ) + wxS( "cli/variants/" );
+
+    wxFileName schPath( testDataDir, wxS( "variants.kicad_sch" ) );
+
+    kiapi::common::types::DocumentSpecifier document;
+
+    BOOST_REQUIRE_MESSAGE(
+            Client().OpenDocument( schPath.GetFullPath(), kiapi::common::types::DOCTYPE_SCHEMATIC, &document ),
+            "OpenDocument failed: " + Client().LastError() );
+
+    wxFileName outputPath = wxFileName::CreateTempFileName( wxS( "api_job_bom_defaults_" ) );
+    outputPath.SetExt( wxS( "csv" ) );
+
+    kiapi::schematic::jobs::RunSchematicJobExportBOM request;
+    *request.mutable_job_settings()->mutable_document() = document;
+    request.mutable_job_settings()->set_output_path( outputPath.GetFullPath().ToUTF8().data() );
+
+    kiapi::common::types::RunJobResponse response;
+    BOOST_REQUIRE_MESSAGE( Client().RunJob( request, &response ), "RunJob failed: " + Client().LastError() );
+
+    BOOST_REQUIRE_MESSAGE( response.status() == kiapi::common::types::JS_SUCCESS,
+                           "Job failed: " + wxString::FromUTF8( response.message() ) );
+    BOOST_REQUIRE_MESSAGE( response.output_path_size() > 0, "Job returned no output paths" );
+
+    wxString      generatedPath = wxString::FromUTF8( response.output_path( 0 ) );
+    std::ifstream generatedStream( generatedPath.ToStdString() );
+    BOOST_REQUIRE_MESSAGE( generatedStream.is_open(), "Generated BOM does not exist: " + generatedPath );
+
+    std::string header;
+    BOOST_REQUIRE( std::getline( generatedStream, header ) );
+
+    if( !header.empty() && header.back() == '\r' )
+        header.pop_back();
+
+    BOOST_CHECK_EQUAL( header, "\"Refs\",\"Value\",\"Footprint\",\"Qty\",\"DNP\"" );
+
+    size_t      rows = 0;
+    std::string line;
+
+    while( std::getline( generatedStream, line ) )
+    {
+        if( !line.empty() && line != "\r" )
+            rows++;
+    }
+
+    // The same symbols the golden file of ExportSchematicBom lists
+    BOOST_CHECK_EQUAL( rows, 56 );
+
+    generatedStream.close();
+
+    if( wxFileName::FileExists( generatedPath ) )
+        wxRemoveFile( generatedPath );
+
+    if( wxFileName::FileExists( outputPath.GetFullPath() ) )
+        wxRemoveFile( outputPath.GetFullPath() );
+}
+
+
 // Since 11.0: RunJobSettings.async queues the job and answers JS_RUNNING with a job id;
 // GetJobStatus reports it finished with the result, and return_inline carries the output bytes.
 BOOST_FIXTURE_TEST_CASE( ExportBoardSvgAsyncWithInlineOutput, API_SERVER_E2E_FIXTURE )

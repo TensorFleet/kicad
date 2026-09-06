@@ -2241,17 +2241,28 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_SCH::handleRunSchematicJobExpo
     if( !aCtx.Request.job_settings().output_path().empty() )
         bomJob.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 
+    // Without a format preset the delimiters are taken as-is, so an omitted one has to be filled
+    // in with the value `kicad-cli sch export bom` defaults to; otherwise the export writes
+    // unquoted, unseparated rows
+    auto delimiter =
+            []( const std::string& aValue, const wxString& aDefault )
+            {
+                return aValue.empty() ? aDefault : wxString::FromUTF8( aValue );
+            };
+
     bomJob.m_bomFmtPresetName = wxString::FromUTF8( aCtx.Request.format().preset_name() );
-    bomJob.m_fieldDelimiter = wxString::FromUTF8( aCtx.Request.format().field_delimiter() );
-    bomJob.m_stringDelimiter = wxString::FromUTF8( aCtx.Request.format().string_delimiter() );
-    bomJob.m_refDelimiter = wxString::FromUTF8( aCtx.Request.format().ref_delimiter() );
-    bomJob.m_refRangeDelimiter = wxString::FromUTF8( aCtx.Request.format().ref_range_delimiter() );
+    bomJob.m_fieldDelimiter = delimiter( aCtx.Request.format().field_delimiter(), wxS( "," ) );
+    bomJob.m_stringDelimiter = delimiter( aCtx.Request.format().string_delimiter(), wxS( "\"" ) );
+    bomJob.m_refDelimiter = delimiter( aCtx.Request.format().ref_delimiter(), wxS( "," ) );
+    bomJob.m_refRangeDelimiter = delimiter( aCtx.Request.format().ref_range_delimiter(), wxS( "-" ) );
     bomJob.m_keepTabs = aCtx.Request.format().keep_tabs();
     bomJob.m_keepLineBreaks = aCtx.Request.format().keep_line_breaks();
     bomJob.m_includeByteOrderMark = aCtx.Request.format().include_byte_order_mark();
 
     bomJob.m_bomPresetName = wxString::FromUTF8( aCtx.Request.fields().preset_name() );
-    bomJob.m_sortField = wxString::FromUTF8( aCtx.Request.fields().sort_field() );
+    bomJob.m_sortField = aCtx.Request.fields().sort_field().empty()
+                                 ? wxS( "Reference" )
+                                 : wxString::FromUTF8( aCtx.Request.fields().sort_field() );
     bomJob.m_filterString = wxString::FromUTF8( aCtx.Request.fields().filter() );
 
     switch( aCtx.Request.fields().filter_scope() )
@@ -2286,6 +2297,16 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_SCH::handleRunSchematicJobExpo
 
         if( field.group_by() )
             bomJob.m_fieldsGroupBy.emplace_back( wxString::FromUTF8( field.name() ) );
+    }
+
+    // A request that names neither a preset nor any field would export a BOM with no columns at
+    // all, which writes an empty file; give it the columns `kicad-cli sch export bom` defaults to
+    if( bomJob.m_bomPresetName.IsEmpty() && bomJob.m_fieldsOrdered.empty() )
+    {
+        bomJob.m_fieldsOrdered = { wxS( "Reference" ), wxS( "Value" ), wxS( "Footprint" ), wxS( "QUANTITY" ),
+                                   wxS( "DNP" ) };
+        bomJob.m_fieldsLabels = { wxS( "Refs" ), wxS( "Value" ), wxS( "Footprint" ), wxS( "Qty" ),
+                                  wxS( "DNP" ) };
     }
 
     bomJob.m_excludeDNP = aCtx.Request.exclude_dnp();
