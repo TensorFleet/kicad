@@ -420,12 +420,12 @@ HANDLER_RESULT<GetItemsResponse> API_HANDLER_PCB::handleGetItems( const HANDLER_
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     GetItemsResponse response;
@@ -1697,11 +1697,12 @@ HANDLER_RESULT<GetItemsResponse> API_HANDLER_PCB::handleGetConnectedItems(
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     std::vector<KICAD_T> types = parseRequestedItemTypes( aCtx.Request.types() );
@@ -1764,11 +1765,12 @@ HANDLER_RESULT<GetItemsResponse> API_HANDLER_PCB::handleGetItemsByNet(
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     std::vector<KICAD_T> types = parseRequestedItemTypes( aCtx.Request.types() );
@@ -1819,11 +1821,12 @@ HANDLER_RESULT<GetItemsResponse> API_HANDLER_PCB::handleGetItemsByNetClass(
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     std::vector<KICAD_T> types = parseRequestedItemTypes( aCtx.Request.types() );

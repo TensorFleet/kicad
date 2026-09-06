@@ -197,6 +197,7 @@ BOOST_AUTO_TEST_CASE( GetItemsReturnsChildrenAndDefinition )
     API_RESULT                result = m_handler->Handle( request );
     BOOST_REQUIRE( !result.has_value() );
     BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_BAD_REQUEST );
+    BOOST_CHECK( !result.error().error_message().empty() );
 
     query.mutable_header()->mutable_document()->set_type( kiapi::common::types::DOCTYPE_FOOTPRINT );
     request = makeRequest( query );

@@ -443,12 +443,12 @@ HANDLER_RESULT<Empty> API_HANDLER_SYMBOL::handleSaveCopyOfDocument(
 
 HANDLER_RESULT<GetItemsResponse> API_HANDLER_SYMBOL::handleGetItems( const HANDLER_CONTEXT<GetItems>& aCtx )
 {
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     GetItemsResponse response;
@@ -529,11 +529,12 @@ std::map<KICAD_T, uint32_t> API_HANDLER_SYMBOL::countItems( const DocumentSpecif
 
 HANDLER_RESULT<GetItemsResponse> API_HANDLER_SYMBOL::handleGetItemsById( const HANDLER_CONTEXT<GetItemsById>& aCtx )
 {
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     GetItemsResponse response;

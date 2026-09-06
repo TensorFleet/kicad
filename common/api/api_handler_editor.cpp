@@ -1018,12 +1018,12 @@ HANDLER_RESULT<DeleteItemsResponse> API_HANDLER_EDITOR::handleDeleteItems(
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     std::map<KIID, ItemDeletionStatus> itemsToDelete;
@@ -1067,12 +1067,12 @@ HANDLER_RESULT<HitTestResponse> API_HANDLER_EDITOR::handleHitTest(
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     HitTestResponse response;

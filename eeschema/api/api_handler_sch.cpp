@@ -1253,11 +1253,12 @@ HANDLER_RESULT<GetItemsResponse> API_HANDLER_SCH::handleGetItemsById( const HAND
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     SCH_SHEET_LIST hierarchy = schematic()->Hierarchy();
@@ -1337,12 +1338,12 @@ API_HANDLER_SCH::handleGetSelection( const HANDLER_CONTEXT<GetSelection>& aCtx )
     if( std::optional<ApiResponseStatus> headless = checkForHeadless( "GetSelection" ) )
         return tl::unexpected( *headless );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     std::set<KICAD_T> filter;
@@ -1378,12 +1379,12 @@ API_HANDLER_SCH::handleClearSelection( const HANDLER_CONTEXT<ClearSelection>& aC
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     m_context->GetToolManager()->RunAction( ACTIONS::selectionClear );
@@ -1402,12 +1403,12 @@ API_HANDLER_SCH::handleAddToSelection( const HANDLER_CONTEXT<AddToSelection>& aC
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     SCH_SELECTION_TOOL* tool = m_context->GetToolManager()->GetTool<SCH_SELECTION_TOOL>();
@@ -1452,12 +1453,12 @@ API_HANDLER_SCH::handleRemoveFromSelection( const HANDLER_CONTEXT<RemoveFromSele
     if( std::optional<ApiResponseStatus> busy = checkForBusy() )
         return tl::unexpected( *busy );
 
-    if( !validateItemHeaderDocument( aCtx.Request.header() ) )
+    // validateItemHeaderDocument already answers AS_UNHANDLED for another editor's
+    // document type; anything else it reports is a real error for this client
+    if( HANDLER_RESULT<std::optional<KIID>> header = validateItemHeaderDocument( aCtx.Request.header() );
+        !header )
     {
-        ApiResponseStatus e;
-        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
-        e.set_status( ApiStatusCode::AS_UNHANDLED );
-        return tl::unexpected( e );
+        return tl::unexpected( header.error() );
     }
 
     SCH_SELECTION_TOOL* tool = m_context->GetToolManager()->GetTool<SCH_SELECTION_TOOL>();
