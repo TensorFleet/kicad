@@ -32,6 +32,7 @@
 
 #include <map>
 #include <memory>
+#include <vector>
 
 #include <core/typeinfo.h>
 #include <geometry/shape_poly_set.h>
@@ -3683,6 +3684,15 @@ public:
     void LoadSESSION( const wxString& aFilename );
 
     /**
+     * Parse a SPECCTRA DSN "session" from an already opened reader, for a session that is in
+     * memory rather than on disk.  Since 11.0
+     *
+     * @param aReader supplies the session text; it is not owned here.
+     * @throw IO_ERROR if there is a lexer or parser error.
+     */
+    void LoadSESSION( LINE_READER* aReader );
+
+    /**
      * Write the internal PCB instance out as a SPECTRA DSN format file.
      *
      * @param aFilename The file to save to.
@@ -3707,14 +3717,19 @@ public:
     /**
      * Add the entire #SESSION info to a #BOARD but does not write it out.
      *
-     * The #BOARD given to this function will have all its tracks and via's replaced, and all
-     * its components are subject to being moved.
+     * The #BOARD given to this function will have all its unlocked tracks and vias replaced
+     * unless \a aReplaceTracks is false, and all its components are subject to being moved.
      *
      * @param aBoard The #BOARD to merge the #SESSION information into.
      * @param aCommit Commit used to stage removals, footprint moves, and new tracks for
      *                undo/redo and view updates. The caller is responsible for Push().
+     * @param aReplaceTracks Remove the board's unlocked tracks, arcs and vias before adding the
+     *                       session's; otherwise the session's items are added to what is there.
+     * @param aWarnings Collects the problems that did not abort the import (items that could not
+     *                  be resolved); when null they go to wxLogWarning instead.
      */
-    void FromSESSION( BOARD* aBoard, COMMIT& aCommit );
+    void FromSESSION( BOARD* aBoard, COMMIT& aCommit, bool aReplaceTracks = true,
+                      std::vector<wxString>* aWarnings = nullptr );
 
     /**
      * Write the internal #SESSION instance out as a #SPECTRA DSN format file.
@@ -3978,9 +3993,21 @@ private:
  * @param aBoard board object
  * @param fullFileName specctra session file name
  * @param aCommit commit for undo/redo and view updates
+ * @param aReplaceTracks remove the board's unlocked tracks and vias first (the editor's behavior)
+ * @param aWarnings collects non-fatal problems; when null they go to wxLogWarning
  */
 
-bool ImportSpecctraSession( BOARD* aBoard, const wxString& fullFileName, COMMIT& aCommit );
+bool ImportSpecctraSession( BOARD* aBoard, const wxString& fullFileName, COMMIT& aCommit,
+                            bool aReplaceTracks = true, std::vector<wxString>* aWarnings = nullptr );
+
+/**
+ * @brief Import a session that is already in memory.  Since 11.0
+ *
+ * @param aReader supplies the session text (a STRING_LINE_READER, for instance)
+ * @see ImportSpecctraSession( BOARD*, const wxString&, COMMIT&, bool, std::vector<wxString>* )
+ */
+bool ImportSpecctraSession( BOARD* aBoard, LINE_READER& aReader, COMMIT& aCommit,
+                            bool aReplaceTracks = true, std::vector<wxString>* aWarnings = nullptr );
 
 }           // namespace DSN
 

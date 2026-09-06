@@ -104,6 +104,7 @@
 #include <pcb_generator.h>
 #include <generators/pcb_tuning_pattern.h>
 #include <ratsnest/ratsnest_data.h>
+#include <specctra_import_export/specctra.h>
 #include <api/api_undo_stack.h>
 #include <origin_viewitem.h>
 #include <undo_redo_container.h>
@@ -235,6 +236,8 @@ API_HANDLER_PCB::API_HANDLER_PCB( std::shared_ptr<PCB_CONTEXT> aContext, PCB_EDI
     registerHandler<RemoveTeardrops, SetTeardropsResponse>( &API_HANDLER_PCB::handleRemoveTeardrops );
     registerHandler<AutoplaceFootprints, AutoplaceFootprintsResponse>( &API_HANDLER_PCB::handleAutoplaceFootprints );
     registerHandler<GlobalDeletion, GlobalDeletionResponse>( &API_HANDLER_PCB::handleGlobalDeletion );
+    registerHandler<ImportSpecctraSession, ImportSpecctraSessionResponse>(
+            &API_HANDLER_PCB::handleImportSpecctraSession );
     registerHandler<GetGraphicsDefaults, GraphicsDefaultsResponse>( &API_HANDLER_PCB::handleGetGraphicsDefaults );
     registerHandler<SetGraphicsDefaults, GraphicsDefaultsResponse>( &API_HANDLER_PCB::handleSetGraphicsDefaults );
 
@@ -4657,6 +4660,144 @@ HANDLER_RESULT<GlobalDeletionResponse> API_HANDLER_PCB::handleGlobalDeletion( co
         brd->DeleteMARKERs();
         bumpRevision();
     }
+
+    if( frame() )
+        frame()->Refresh();
+
+    return response;
+}
+
+
+//// Specctra session import (Since 11.0) ////
+
+HANDLER_RESULT<ImportSpecctraSessionResponse>
+API_HANDLER_PCB::handleImportSpecctraSession( const HANDLER_CONTEXT<ImportSpecctraSession>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    ApiResponseStatus e;
+    e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+
+    // The importer reverts its commit on a parse error, so it gets one of its own rather than
+    // a client's
+    if( m_activeClients.contains( aCtx.ClientName ) )
+    {
+        e.set_status( ApiStatusCode::AS_BUSY );
+        e.set_error_message( "ImportSpecctraSession cannot run inside a client commit; call EndCommit first" );
+        return tl::unexpected( e );
+    }
+
+    const ImportSpecctraSession& req = aCtx.Request;
+    wxString                     path = wxString::FromUTF8( req.path() );
+
+    if( req.contents().empty() && path.IsEmpty() )
+    {
+        e.set_error_message( "ImportSpecctraSession needs a path or the session's contents" );
+        return tl::unexpected( e );
+    }
+
+    if( req.contents().empty() && !wxFileName::FileExists( path ) )
+    {
+        e.set_error_message( fmt::format( "session file '{}' does not exist", req.path() ) );
+        return tl::unexpected( e );
+    }
+
+    // Removing tracks and vias would leave dangling selection pointers in an editor
+    if( m_frame && toolManager() )
+        toolManager()->RunAction( PCB_ACTIONS::selectionClear );
+
+    BOARD*                  brd = board();
+    std::unique_ptr<COMMIT> owned = createCommit();
+    BOARD_COMMIT*           commit = static_cast<BOARD_COMMIT*>( owned.get() );
+    std::vector<wxString>   warnings;
+
+    // A router echoes the placement of every footprint; only the ones it changed count as moved
+    struct PLACEMENT
+    {
+        VECTOR2I     Position;
+        EDA_ANGLE    Orientation;
+        PCB_LAYER_ID Layer;
+    };
+
+    std::map<FOOTPRINT*, PLACEMENT> placements;
+
+    for( FOOTPRINT* footprint : brd->Footprints() )
+        placements[footprint] = { footprint->GetPosition(), footprint->GetOrientation(), footprint->GetLayer() };
+
+    try
+    {
+        if( !req.contents().empty() )
+        {
+            STRING_LINE_READER reader( req.contents(), wxS( "ImportSpecctraSession.contents" ) );
+            DSN::ImportSpecctraSession( brd, reader, *commit, req.replace_existing_tracks(), &warnings );
+        }
+        else
+        {
+            DSN::ImportSpecctraSession( brd, path, *commit, req.replace_existing_tracks(), &warnings );
+        }
+    }
+    catch( const IO_ERROR& ioe )
+    {
+        commit->Revert();
+        e.set_error_message( fmt::format( "could not import the session: {}", ioe.What().ToUTF8().data() ) );
+        return tl::unexpected( e );
+    }
+
+    ImportSpecctraSessionResponse response;
+
+    commit->ForEachEntry(
+            [&]( EDA_ITEM* aItem, CHANGE_TYPE aType )
+            {
+                if( !aItem )
+                    return;
+
+                switch( aType & CHT_TYPE )
+                {
+                case CHT_ADD:
+                    if( aItem->Type() == PCB_VIA_T )
+                        response.set_vias_added( response.vias_added() + 1 );
+                    else if( aItem->Type() == PCB_TRACE_T || aItem->Type() == PCB_ARC_T )
+                        response.set_tracks_added( response.tracks_added() + 1 );
+
+                    break;
+
+                case CHT_REMOVE:
+                    if( aItem->Type() == PCB_VIA_T || aItem->Type() == PCB_TRACE_T || aItem->Type() == PCB_ARC_T )
+                        response.set_tracks_removed( response.tracks_removed() + 1 );
+
+                    break;
+
+                case CHT_MODIFY:
+                    if( aItem->Type() == PCB_FOOTPRINT_T )
+                    {
+                        FOOTPRINT* footprint = static_cast<FOOTPRINT*>( aItem );
+                        auto       before = placements.find( footprint );
+
+                        if( before != placements.end()
+                            && ( before->second.Position != footprint->GetPosition()
+                                 || before->second.Orientation != footprint->GetOrientation()
+                                 || before->second.Layer != footprint->GetLayer() ) )
+                        {
+                            response.set_footprints_moved( response.footprints_moved() + 1 );
+                        }
+                    }
+
+                    break;
+
+                default:
+                    break;
+                }
+            } );
+
+    for( const wxString& warning : warnings )
+        response.add_warnings( warning.ToUTF8().data() );
+
+    publishDocumentChanged( aCtx.ClientName, _( "Import Specctra Session" ), nullptr, commit );
+    commit->Push( _( "Import Specctra Session" ) );
 
     if( frame() )
         frame()->Refresh();

@@ -35,6 +35,7 @@
 #include <api/common/commands/base_commands.pb.h>
 #include <api/common/commands/editor_commands.pb.h>
 #include <footprint.h>
+#include <wx/file.h>
 #include <wx/utils.h>
 
 using namespace kiapi::common::commands;
@@ -549,4 +550,161 @@ BOOST_FIXTURE_TEST_CASE( BoardOpsDrcAsync, API_SERVER_E2E_FIXTURE )
     BOOST_CHECK_EQUAL( after.markers_size(), expected.markers_size() );
     BOOST_CHECK_EQUAL( after.error_count(), expected.error_count() );
     BOOST_CHECK_EQUAL( after.warning_count(), expected.warning_count() );
+}
+
+namespace
+{
+
+/// A session an autorouter could have produced from the kitchen sink's DSN: one routed net
+/// with a via, a wire on a net the board does not have, and a wire on a layer it does not have
+const char* KITCHEN_SINK_SESSION =
+        "(session api_kitchen_sink\n"
+        "  (base_design api_kitchen_sink.dsn)\n"
+        "  (routes\n"
+        "    (resolution um 10)\n"
+        "    (library_out\n"
+        "      (padstack \"Via[0-1]_600:300_um\"\n"
+        "        (shape (circle F.Cu 6000 0 0))\n"
+        "        (shape (circle B.Cu 6000 0 0))\n"
+        "        (attach off)\n"
+        "      )\n"
+        "    )\n"
+        "    (network_out\n"
+        "      (net A\n"
+        "        (wire (path F.Cu 2500 1000000 -600000 1010000 -600000 1010000 -610000) (type route))\n"
+        "        (via \"Via[0-1]_600:300_um\" 1010000 -610000)\n"
+        "      )\n"
+        "      (net NoSuchNet\n"
+        "        (wire (path B.Cu 2500 1000000 -700000 1020000 -700000))\n"
+        "      )\n"
+        "      (net A\n"
+        "        (wire (path NoSuch.Cu 2500 1000000 -700000 1020000 -700000))\n"
+        "      )\n"
+        "    )\n"
+        "  )\n"
+        ")\n";
+
+
+int CountTracksAndVias( API_TEST_CLIENT& aClient, const DocumentSpecifier& aDoc )
+{
+    return CountItems( aClient, aDoc, kiapi::common::types::KOT_PCB_TRACE )
+           + CountItems( aClient, aDoc, kiapi::common::types::KOT_PCB_ARC )
+           + CountItems( aClient, aDoc, kiapi::common::types::KOT_PCB_VIA );
+}
+
+
+uint64_t DocumentRevision( API_TEST_CLIENT& aClient, const DocumentSpecifier& aDoc )
+{
+    GetDocumentRevision request;
+    *request.mutable_document() = aDoc;
+
+    DocumentRevisionResponse response;
+    wxString                 error;
+
+    if( !Send( aClient, request, &response, &error ) )
+        return 0;
+
+    return response.revision();
+}
+
+} // namespace
+
+
+/// ImportSpecctraSession merges a router's session into the board as one undoable commit,
+/// from a file or from memory, keeping or replacing the tracks that are already there.
+BOOST_FIXTURE_TEST_CASE( BoardOpsImportSpecctraSession, API_SERVER_E2E_FIXTURE )
+{
+    BOOST_REQUIRE_MESSAGE( Start(), LastError() );
+
+    TEMP_BOARD_PROJECT project;
+    DocumentSpecifier  board;
+    BOOST_REQUIRE_MESSAGE( OpenKitchenSinkBoard( *this, project, &board ),
+                           "OpenDocument failed: " + Client().LastError() );
+
+    wxString error;
+
+    const int      tracksBefore = CountItems( Client(), board, kiapi::common::types::KOT_PCB_TRACE );
+    const int      viasBefore = CountItems( Client(), board, kiapi::common::types::KOT_PCB_VIA );
+    const int      allBefore = CountTracksAndVias( Client(), board );
+    const uint64_t revisionBefore = DocumentRevision( Client(), board );
+    BOOST_REQUIRE_GT( tracksBefore, 0 );
+
+    // Neither a path nor contents
+    {
+        ImportSpecctraSession request;
+        *request.mutable_board() = board;
+        BOOST_CHECK_EQUAL( SendStatus( Client(), request ), kiapi::common::AS_BAD_REQUEST );
+
+        request.set_path( "/nonexistent/routed.ses" );
+        BOOST_CHECK_EQUAL( SendStatus( Client(), request ), kiapi::common::AS_BAD_REQUEST );
+    }
+
+    // A session without a library_out is rejected and leaves the board alone
+    {
+        ImportSpecctraSession request;
+        *request.mutable_board() = board;
+        request.set_contents( "(session x (routes (resolution um 10) (network_out)))" );
+        request.set_replace_existing_tracks( true );
+        BOOST_CHECK_EQUAL( SendStatus( Client(), request ), kiapi::common::AS_BAD_REQUEST );
+        BOOST_CHECK_EQUAL( CountTracksAndVias( Client(), board ), allBefore );
+        BOOST_CHECK_EQUAL( DocumentRevision( Client(), board ), revisionBefore );
+    }
+
+    // From memory, adding to the existing routing
+    {
+        ImportSpecctraSession request;
+        *request.mutable_board() = board;
+        request.set_contents( KITCHEN_SINK_SESSION );
+
+        ImportSpecctraSessionResponse response;
+        BOOST_REQUIRE_MESSAGE( Send( Client(), request, &response, &error ), error );
+
+        // The three-point path is two tracks, the unknown net's wire lands on no net
+        BOOST_CHECK_EQUAL( response.tracks_added(), 3 );
+        BOOST_CHECK_EQUAL( response.vias_added(), 1 );
+        BOOST_CHECK_EQUAL( response.tracks_removed(), 0 );
+        BOOST_CHECK_EQUAL( response.footprints_moved(), 0 );
+        BOOST_REQUIRE_EQUAL( response.warnings_size(), 1 );
+        BOOST_CHECK( response.warnings( 0 ).find( "1 session item" ) != std::string::npos );
+
+        BOOST_CHECK_EQUAL( CountItems( Client(), board, kiapi::common::types::KOT_PCB_TRACE ), tracksBefore + 3 );
+        BOOST_CHECK_EQUAL( CountItems( Client(), board, kiapi::common::types::KOT_PCB_VIA ), viasBefore + 1 );
+        BOOST_CHECK_GT( DocumentRevision( Client(), board ), revisionBefore );
+    }
+
+    // The import is one undo step
+    {
+        Undo undo;
+        *undo.mutable_document() = board;
+
+        UndoRedoResponse response;
+        BOOST_REQUIRE_MESSAGE( Send( Client(), undo, &response, &error ), error );
+        BOOST_CHECK_EQUAL( response.applied(), 1 );
+        BOOST_CHECK_EQUAL( CountTracksAndVias( Client(), board ), allBefore );
+    }
+
+    // From a file, replacing the unlocked routing
+    {
+        wxString sessionPath = wxFileName::CreateTempFileName( wxS( "kicad-api-session-" ) );
+        {
+            wxFile file( sessionPath, wxFile::write );
+            BOOST_REQUIRE( file.IsOpened() );
+            file.Write( wxString::FromUTF8( KITCHEN_SINK_SESSION ) );
+        }
+
+        ImportSpecctraSession request;
+        *request.mutable_board() = board;
+        request.set_path( sessionPath.ToUTF8().data() );
+        request.set_replace_existing_tracks( true );
+
+        ImportSpecctraSessionResponse response;
+        BOOST_REQUIRE_MESSAGE( Send( Client(), request, &response, &error ), error );
+        wxRemoveFile( sessionPath );
+
+        BOOST_CHECK_EQUAL( response.tracks_added(), 3 );
+        BOOST_CHECK_EQUAL( response.vias_added(), 1 );
+        BOOST_CHECK_GT( response.tracks_removed(), 0 );
+        BOOST_CHECK_EQUAL( CountTracksAndVias( Client(), board ),
+                           allBefore - static_cast<int>( response.tracks_removed() ) + 4 );
+    }
 }

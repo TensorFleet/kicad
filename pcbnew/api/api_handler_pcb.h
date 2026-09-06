@@ -256,6 +256,9 @@ private:
 
     HANDLER_RESULT<GlobalDeletionResponse> handleGlobalDeletion( const HANDLER_CONTEXT<GlobalDeletion>& aCtx );
 
+    HANDLER_RESULT<ImportSpecctraSessionResponse>
+    handleImportSpecctraSession( const HANDLER_CONTEXT<ImportSpecctraSession>& aCtx );
+
     HANDLER_RESULT<GraphicsDefaultsResponse>
     handleGetGraphicsDefaults( const HANDLER_CONTEXT<GetGraphicsDefaults>& aCtx );
 
