@@ -467,6 +467,9 @@ private:
     int compare( const SCH_ITEM& aOther, int aCompareFlags = 0 ) const override;
 
 protected:
+    void swapData( SCH_ITEM* aItem ) override;
+
+protected:
     SCH_PIN*                m_libPin;          // The corresponding pin in the LIB_SYMBOL
                                                //   (nullptr for a pin *in* the LIB_SYMBOL)
 

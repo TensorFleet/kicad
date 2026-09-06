@@ -305,6 +305,39 @@ void SCH_PIN::Serialize( google::protobuf::Any& aContainer ) const
 }
 
 
+void SCH_PIN::swapData( SCH_ITEM* aItem )
+{
+    wxCHECK_RET( aItem && aItem->Type() == SCH_PIN_T, wxS( "Cannot swap pin data with a non-pin" ) );
+
+    SCH_PIN* pin = static_cast<SCH_PIN*>( aItem );
+
+    std::swap( m_libPin, pin->m_libPin );
+    std::swap( m_alternates, pin->m_alternates );
+    std::swap( m_position, pin->m_position );
+    std::swap( m_length, pin->m_length );
+    std::swap( m_orientation, pin->m_orientation );
+    std::swap( m_shape, pin->m_shape );
+    std::swap( m_type, pin->m_type );
+    std::swap( m_hidden, pin->m_hidden );
+    std::swap( m_name, pin->m_name );
+    std::swap( m_number, pin->m_number );
+    std::swap( m_numTextSize, pin->m_numTextSize );
+    std::swap( m_nameTextSize, pin->m_nameTextSize );
+    std::swap( m_alt, pin->m_alt );
+    std::swap( m_operatingPoint, pin->m_operatingPoint );
+
+    // Not saved and purely render state, but they describe the geometry that was swapped
+    std::swap( m_remappedFromNumber, pin->m_remappedFromNumber );
+    std::swap( m_flipStackedTextSide, pin->m_flipStackedTextSide );
+
+    if( m_layoutCache )
+        m_layoutCache->MarkDirty( PIN_LAYOUT_CACHE::DIRTY_FLAGS::ALL );
+
+    if( pin->m_layoutCache )
+        pin->m_layoutCache->MarkDirty( PIN_LAYOUT_CACHE::DIRTY_FLAGS::ALL );
+}
+
+
 bool SCH_PIN::Deserialize( const google::protobuf::Any& aContainer )
 {
     using namespace kiapi::common;
