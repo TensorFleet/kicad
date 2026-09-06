@@ -30,7 +30,13 @@
 #include <schematic_utils/schematic_file_util.h>
 #include <settings/settings_manager.h>
 
+#include <core/ignore.h>
 #include <schematic.h>
+#include <api/schematic/schematic_commands.pb.h>
+#include <sch_screen.h>
+#include <sch_marker.h>
+#include <erc/erc_settings.h>
+#include <erc/erc_item.h>
 
 
 namespace
@@ -193,5 +199,114 @@ BOOST_AUTO_TEST_CASE( SymbolFieldTakesPrecedenceOverCustomProperty )
     BOOST_CHECK_EQUAL( status.code(), kiapi::common::commands::ItemStatusCode::ISC_INVALID_DATA );
     BOOST_CHECK_NE( status.error_message().find( "MPN" ), std::string::npos );
 }
+
+
+BOOST_AUTO_TEST_CASE( RunSchematicJobErcPopulatesMarkers )
+{
+    SCHEMATIC* schematic = loadSchematic( wxS( "api_kitchen_sink" ) );
+    API_HANDLER_SCH handler( m_context );
+
+    auto handle = [&]( const auto& aCommand, auto& aResponse )
+    {
+        ApiRequest request;
+        request.mutable_header()->set_client_name( "kicad.qa" );
+        BOOST_REQUIRE( request.mutable_message()->PackFrom( aCommand ) );
+
+        API_RESULT result = handler.Handle( request );
+        BOOST_REQUIRE_MESSAGE( result.has_value(), "request failed: " << result.error().error_message() );
+        BOOST_REQUIRE( result->message().UnpackTo( &aResponse ) );
+    };
+
+    kiapi::schematic::commands::RunSchematicJobErc run;
+    *run.mutable_schematic() = makeDocument( *schematic );
+
+    kiapi::schematic::commands::ErcResultsResponse results;
+    handle( run, results );
+
+    // Count the markers the checker left in the hierarchy
+    int markersInSchematic = 0;
+    SCH_SCREENS screens( schematic->Root() );
+
+    for( SCH_SCREEN* screen = screens.GetFirst(); screen; screen = screens.GetNext() )
+    {
+        for( SCH_ITEM* item : screen->Items().OfType( SCH_MARKER_T ) )
+        {
+            ignore_unused( item );
+            ++markersInSchematic;
+        }
+    }
+
+    BOOST_CHECK_GT( results.markers_size(), 0 );
+    BOOST_CHECK_EQUAL( results.markers_size(), markersInSchematic );
+    BOOST_CHECK_EQUAL( results.error_count() + results.warning_count() + results.exclusion_count(),
+                       static_cast<uint32_t>( results.markers_size() ) );
+
+    for( const kiapi::schematic::ErcMarker& marker : results.markers() )
+    {
+        BOOST_CHECK( !marker.id().value().empty() );
+        BOOST_CHECK( marker.severity() != kiapi::common::types::RS_UNKNOWN );
+        BOOST_CHECK( !marker.description().empty() );
+    }
+
+    // A second run on an unchanged schematic finds the same violations (connectivity is rebuilt
+    // before each headless run)
+    kiapi::schematic::commands::ErcResultsResponse rerun;
+    handle( run, rerun );
+    BOOST_CHECK_EQUAL( rerun.markers_size(), results.markers_size() );
+    BOOST_CHECK_EQUAL( rerun.error_count(), results.error_count() );
+    BOOST_CHECK_EQUAL( rerun.warning_count(), results.warning_count() );
+    results = rerun;
+
+    // GetErcMarkers reports the same set; excluding one moves it to the exclusion count
+    kiapi::schematic::commands::GetErcMarkers get;
+    *get.mutable_schematic() = makeDocument( *schematic );
+
+    kiapi::schematic::commands::ErcResultsResponse again;
+    handle( get, again );
+    BOOST_CHECK_EQUAL( again.markers_size(), results.markers_size() );
+
+    kiapi::schematic::commands::SetErcMarkerExcluded exclude;
+    *exclude.mutable_schematic() = makeDocument( *schematic );
+    *exclude.add_markers() = results.markers( 0 ).id();
+    exclude.set_excluded( true );
+    exclude.set_comment( "known" );
+
+    google::protobuf::Empty empty;
+    handle( exclude, empty );
+    handle( get, again );
+
+    BOOST_CHECK_EQUAL( again.exclusion_count(), results.exclusion_count() + 1 );
+    BOOST_CHECK_EQUAL( schematic->ErcSettings().m_ErcExclusions.size(), static_cast<size_t>( again.exclusion_count() ) );
+
+    // Exclusions survive a re-run
+    handle( run, results );
+    BOOST_CHECK_EQUAL( results.exclusion_count(), again.exclusion_count() );
+
+    // Severities: every rule type listed once; changing one is reflected in the settings
+    kiapi::schematic::commands::GetErcSeverities getSeverities;
+    *getSeverities.mutable_schematic() = makeDocument( *schematic );
+
+    kiapi::schematic::commands::ErcSeveritiesResponse severities;
+    handle( getSeverities, severities );
+    BOOST_CHECK_EQUAL( severities.severities_size(), static_cast<int>( ERC_ITEM::GetItemsWithSeverities().size() ) );
+
+    kiapi::schematic::commands::SetErcSeverities setSeverities;
+    *setSeverities.mutable_schematic() = makeDocument( *schematic );
+    kiapi::schematic::ErcSeveritySetting* change = setSeverities.add_severities();
+    change->set_rule_type( kiapi::schematic::ERCET_PIN_NOT_CONNECTED );
+    change->set_severity( kiapi::common::types::RS_IGNORE );
+
+    handle( setSeverities, severities );
+    BOOST_CHECK_EQUAL( schematic->ErcSettings().GetSeverity( ERCE_PIN_NOT_CONNECTED ), RPT_SEVERITY_IGNORE );
+
+    change->set_severity( kiapi::common::types::RS_EXCLUSION );
+    ApiRequest request;
+    request.mutable_header()->set_client_name( "kicad.qa" );
+    BOOST_REQUIRE( request.mutable_message()->PackFrom( setSeverities ) );
+    API_RESULT result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_BAD_REQUEST );
+}
+
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -621,3 +621,94 @@ message InteractiveMoveItems
 
   repeated kiapi.common.types.KIID items = 2;
 }
+
+
+//// DRC ////
+
+// Runs the design rule checker on an open board, replacing the board's DRC markers with the
+// results, exactly as the "kicad-cli pcb drc" job does.  The check runs synchronously.
+// Returns DrcResultsResponse
+// Since 11.0
+message RunBoardJobDrc
+{
+  kiapi.common.types.DocumentSpecifier board = 1;
+
+  // Refill all zones before running the check
+  bool refill_zones = 2;
+
+  // Report every track clearance error instead of only the first per track
+  bool report_all_track_errors = 3;
+
+  // Compare the board against the schematic (schematic parity checks); requires either
+  // schematic_netlist_path or a schematic next to the board file
+  bool test_footprints_against_schematic = 4;
+
+  // Optional path to a KiCad netlist file to use for the parity checks instead of netlisting the
+  // project's schematic
+  string schematic_netlist_path = 5;
+}
+
+// Since 11.0
+message DrcResultsResponse
+{
+  // Every DRC, unconnected-item, and parity marker on the board, including excluded ones
+  repeated kiapi.board.DrcMarker markers = 1;
+
+  // Counts of markers by effective severity; excluded markers are only counted in exclusion_count
+  uint32 error_count = 2;
+  uint32 warning_count = 3;
+  uint32 exclusion_count = 4;
+
+  // Of the markers above, how many are unconnected-item (ratsnest) markers
+  uint32 unconnected_count = 5;
+
+  // Of the markers above, how many are schematic parity markers
+  uint32 parity_count = 6;
+}
+
+// Returns the DRC markers currently on the board without running the checker.
+// Returns DrcResultsResponse
+// Since 11.0
+message GetDrcMarkers
+{
+  kiapi.common.types.DocumentSpecifier board = 1;
+}
+
+// Marks the given markers as excluded (or clears the exclusion).  The board's exclusion list is
+// updated so the change persists with the project.
+// Since 11.0
+message SetDrcMarkerExcluded
+{
+  kiapi.common.types.DocumentSpecifier board = 1;
+
+  repeated kiapi.common.types.KIID markers = 2;
+
+  bool excluded = 3;
+
+  // Comment stored with the exclusion; ignored when clearing
+  string comment = 4;
+}
+
+// Returns DrcSeveritiesResponse: the severity of every DRC rule type for the open board
+// Since 11.0
+message GetDrcSeverities
+{
+  kiapi.common.types.DocumentSpecifier board = 1;
+}
+
+// Since 11.0
+message DrcSeveritiesResponse
+{
+  repeated kiapi.board.DrcSeveritySetting severities = 1;
+}
+
+// Sets the severity of the given DRC rule types; rule types not listed keep their current
+// severity.  Only error, warning, and ignore are accepted.
+// Returns DrcSeveritiesResponse with the full resulting set
+// Since 11.0
+message SetDrcSeverities
+{
+  kiapi.common.types.DocumentSpecifier board = 1;
+
+  repeated kiapi.board.DrcSeveritySetting severities = 2;
+}

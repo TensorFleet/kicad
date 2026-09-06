@@ -29,6 +29,13 @@
 #include <wx/log.h>
 #include <magic_enum.hpp>
 #include <base_screen.h>
+#include <drawing_sheet/ds_proxy_view_item.h>
+#include <erc/erc.h>
+#include <erc/erc_item.h>
+#include <erc/erc_settings.h>
+#include <libraries/symbol_library_adapter.h>
+#include <project_sch.h>
+#include <sch_marker.h>
 #include <jobs/job_export_bom.h>
 #include <jobs/job_export_sch_netlist.h>
 #include <jobs/job_export_sch_plot.h>
@@ -59,6 +66,7 @@
 #include <trace_helpers.h>
 
 using namespace kiapi::common::commands;
+using namespace kiapi::schematic::commands;
 using kiapi::common::types::CommandStatus;
 using kiapi::common::types::DocumentType;
 using kiapi::common::types::ItemRequestStatus;
@@ -157,6 +165,11 @@ API_HANDLER_SCH::API_HANDLER_SCH( std::shared_ptr<SCH_CONTEXT> aContext,
     registerHandler<RunSchematicJobExportBOM, types::RunJobResponse>(
             &API_HANDLER_SCH::handleRunSchematicJobExportBOM );
     registerHandler<GetSchematicHierarchy, SchematicHierarchyResponse>( &API_HANDLER_SCH::handleGetSchematicHierarchy );
+    registerHandler<RunSchematicJobErc, ErcResultsResponse>( &API_HANDLER_SCH::handleRunSchematicJobErc );
+    registerHandler<GetErcMarkers, ErcResultsResponse>( &API_HANDLER_SCH::handleGetErcMarkers );
+    registerHandler<SetErcMarkerExcluded, Empty>( &API_HANDLER_SCH::handleSetErcMarkerExcluded );
+    registerHandler<GetErcSeverities, ErcSeveritiesResponse>( &API_HANDLER_SCH::handleGetErcSeverities );
+    registerHandler<SetErcSeverities, ErcSeveritiesResponse>( &API_HANDLER_SCH::handleSetErcSeverities );
     registerHandler<GetPageSettings, types::PageSettings>( &API_HANDLER_SCH::handleGetPageSettings );
     registerHandler<SetPageSettings, types::PageSettings>( &API_HANDLER_SCH::handleSetPageSettings );
     registerHandler<GetSchematicNetlist, SchematicNetlistResponse>( &API_HANDLER_SCH::handleGetSchematicNetlist );
@@ -428,6 +441,286 @@ API_HANDLER_SCH::handleRevertDocument( const HANDLER_CONTEXT<RevertDocument>& aC
 
     bumpRevision();
     return google::protobuf::Empty();
+}
+
+
+void API_HANDLER_SCH::collectErcMarkers( ErcResultsResponse& aResponse ) const
+{
+    uint32_t    errors = 0, warnings = 0, exclusions = 0;
+    SCH_SCREENS screens( schematic()->Root() );
+
+    for( SCH_SCREEN* screen = screens.GetFirst(); screen; screen = screens.GetNext() )
+    {
+        for( SCH_ITEM* item : screen->Items().OfType( SCH_MARKER_T ) )
+        {
+            const SCH_MARKER* marker = static_cast<const SCH_MARKER*>( item );
+
+            if( !marker->GetRCItem() )
+                continue;
+
+            google::protobuf::Any any;
+            marker->Serialize( any );
+
+            kiapi::schematic::ErcMarker* msg = aResponse.add_markers();
+            any.UnpackTo( msg );
+
+            SEVERITY severity = marker->GetSeverity();
+
+            msg->mutable_id()->set_value( marker->m_Uuid.AsStdString() );
+            msg->set_severity( ToProtoEnum<SEVERITY, types::RuleSeverity>( severity ) );
+            msg->set_excluded( marker->IsExcluded() );
+            msg->set_exclusion_comment( marker->GetComment().ToUTF8() );
+            msg->set_description( marker->GetRCItem()->GetErrorMessage( true ).ToUTF8() );
+
+            switch( severity )
+            {
+            case RPT_SEVERITY_ERROR:     ++errors;     break;
+            case RPT_SEVERITY_WARNING:   ++warnings;   break;
+            case RPT_SEVERITY_EXCLUSION: ++exclusions; break;
+            default:                                   break;
+            }
+        }
+    }
+
+    aResponse.set_error_count( errors );
+    aResponse.set_warning_count( warnings );
+    aResponse.set_exclusion_count( exclusions );
+}
+
+
+HANDLER_RESULT<ErcResultsResponse> API_HANDLER_SCH::handleGetErcMarkers( const HANDLER_CONTEXT<GetErcMarkers>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    ErcResultsResponse response;
+    collectErcMarkers( response );
+    return response;
+}
+
+
+HANDLER_RESULT<ErcResultsResponse> API_HANDLER_SCH::handleRunSchematicJobErc(
+        const HANDLER_CONTEXT<RunSchematicJobErc>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    // Markers are rebuilt from scratch, which would leave staged changes pointing at freed items
+    for( const auto& [client, commit] : m_commits )
+    {
+        if( commit.second && !commit.second->Empty() )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BUSY );
+            e.set_error_message( fmt::format( "cannot run ERC while client '{}' has uncommitted changes", client ) );
+            return tl::unexpected( e );
+        }
+    }
+
+    SCHEMATIC* sch = schematic();
+
+    // Running ERC requires libraries be loaded, so make sure they have been
+    SYMBOL_LIBRARY_ADAPTER* adapter = PROJECT_SCH::SymbolLibAdapter( &sch->Project() );
+    adapter->AsyncLoad();
+    adapter->BlockUntilLoaded();
+
+    sch->RecordERCExclusions();
+
+    SCH_SCREENS screens( sch->Root() );
+    screens.DeleteAllMarkers( MARKER_BASE::MARKER_ERC, true );
+
+    // The drawing sheet proxy lets the text-variable checks see the sheet, as the CLI job does
+    SCH_SCREEN* root = sch->RootScreen();
+
+    std::unique_ptr<DS_PROXY_VIEW_ITEM> drawingSheet = std::make_unique<DS_PROXY_VIEW_ITEM>(
+            schIUScale, &root->GetPageSettings(), &sch->Project(), &root->GetTitleBlock(), sch->GetProperties() );
+
+    drawingSheet->SetPageNumber( TO_UTF8( root->GetPageNumber() ) );
+    drawingSheet->SetSheetCount( root->GetPageCount() );
+    drawingSheet->SetFileName( TO_UTF8( root->GetFileName() ) );
+    drawingSheet->SetColorLayer( LAYER_SCHEMATIC_DRAWINGSHEET );
+    drawingSheet->SetPageBorderColorLayer( LAYER_SCHEMATIC_PAGE_LIMITS );
+    drawingSheet->SetIsFirstPage( root->GetVirtualPageNumber() == 1 );
+
+    wxString currentVariant = sch->GetCurrentVariant();
+    drawingSheet->SetVariantName( TO_UTF8( currentVariant ) );
+    drawingSheet->SetVariantDesc( TO_UTF8( sch->GetVariantDescription( currentVariant ) ) );
+    drawingSheet->SetSheetName( "" );
+    drawingSheet->SetSheetPath( "" );
+
+    KIWAY*  kiway = m_context->GetKiway();
+    KIFACE* cvpcb = kiway ? kiway->KiFACE( KIWAY::FACE_CVPCB ) : nullptr;
+
+    // RunTests only rebuilds connectivity when it has a frame; do it here so that every headless
+    // run checks the same graph (RunERC leaves state behind that changes a second run otherwise)
+    if( !m_frame )
+    {
+        SCH_COMMIT dummyCommit( toolManager() );
+        sch->RecalculateConnections( &dummyCommit, NO_CLEANUP, toolManager() );
+    }
+
+    ERC_TESTER tester( sch );
+
+    // RunTests resolves the recorded exclusions against the new markers when it finishes
+    tester.RunTests( drawingSheet.get(), m_frame, cvpcb, &sch->Project(), nullptr );
+
+    if( m_frame && m_frame->GetCanvas() )
+    {
+        for( SCH_ITEM* marker : m_frame->GetScreen()->Items().OfType( SCH_MARKER_T ) )
+        {
+            m_frame->GetCanvas()->GetView()->Remove( marker );
+            m_frame->GetCanvas()->GetView()->Add( marker );
+        }
+
+        m_frame->GetCanvas()->Refresh();
+    }
+
+    bumpRevision();
+
+    ErcResultsResponse response;
+    collectErcMarkers( response );
+    return response;
+}
+
+
+HANDLER_RESULT<Empty> API_HANDLER_SCH::handleSetErcMarkerExcluded( const HANDLER_CONTEXT<SetErcMarkerExcluded>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    SCH_SCREENS              screens( schematic()->Root() );
+    std::vector<SCH_MARKER*> markers;
+
+    for( const types::KIID& id : aCtx.Request.markers() )
+    {
+        KIID        kiid( id.value() );
+        SCH_MARKER* found = nullptr;
+
+        for( SCH_SCREEN* screen = screens.GetFirst(); screen && !found; screen = screens.GetNext() )
+        {
+            for( SCH_ITEM* item : screen->Items().OfType( SCH_MARKER_T ) )
+            {
+                if( item->m_Uuid == kiid )
+                {
+                    found = static_cast<SCH_MARKER*>( item );
+                    break;
+                }
+            }
+        }
+
+        if( !found )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( fmt::format( "marker {} not found in the schematic", id.value() ) );
+            return tl::unexpected( e );
+        }
+
+        markers.push_back( found );
+    }
+
+    wxString comment = wxString::FromUTF8( aCtx.Request.comment() );
+
+    for( SCH_MARKER* marker : markers )
+    {
+        marker->SetExcluded( aCtx.Request.excluded(), aCtx.Request.excluded() ? comment : wxString() );
+
+        if( m_frame && m_frame->GetCanvas() )
+            m_frame->GetCanvas()->GetView()->Update( marker );
+    }
+
+    schematic()->RecordERCExclusions();
+    bumpRevision();
+
+    return Empty();
+}
+
+
+ErcSeveritiesResponse API_HANDLER_SCH::ercSeverities() const
+{
+    ErcSeveritiesResponse response;
+    ERC_SETTINGS&         settings = schematic()->ErcSettings();
+
+    for( const RC_ITEM& item : ERC_ITEM::GetItemsWithSeverities() )
+    {
+        ERCE_T code = static_cast<ERCE_T>( item.GetErrorCode() );
+
+        kiapi::schematic::ErcSeveritySetting* setting = response.add_severities();
+        setting->set_rule_type( ToProtoEnum<ERCE_T, kiapi::schematic::ErcErrorType>( code ) );
+        setting->set_severity( ToProtoEnum<SEVERITY, types::RuleSeverity>( settings.GetSeverity( code ) ) );
+    }
+
+    return response;
+}
+
+
+HANDLER_RESULT<ErcSeveritiesResponse> API_HANDLER_SCH::handleGetErcSeverities(
+        const HANDLER_CONTEXT<GetErcSeverities>& aCtx )
+{
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    return ercSeverities();
+}
+
+
+HANDLER_RESULT<ErcSeveritiesResponse> API_HANDLER_SCH::handleSetErcSeverities(
+        const HANDLER_CONTEXT<SetErcSeverities>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    const std::set<SEVERITY>  permitted( { RPT_SEVERITY_ERROR, RPT_SEVERITY_WARNING, RPT_SEVERITY_IGNORE } );
+    std::map<int, SEVERITY>   changes;
+
+    for( const kiapi::schematic::ErcSeveritySetting& setting : aCtx.Request.severities() )
+    {
+        ERCE_T   code = FromProtoEnum<ERCE_T, kiapi::schematic::ErcErrorType>( setting.rule_type() );
+        SEVERITY severity = FromProtoEnum<SEVERITY, types::RuleSeverity>( setting.severity() );
+
+        if( setting.rule_type() == kiapi::schematic::ERCET_UNKNOWN || !permitted.contains( severity ) )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( "ERC severities need a valid rule type and a severity of error, warning, "
+                                 "or ignore" );
+            return tl::unexpected( e );
+        }
+
+        changes[code] = severity;
+    }
+
+    ERC_SETTINGS& settings = schematic()->ErcSettings();
+
+    for( const auto& [code, severity] : changes )
+        settings.m_ERCSeverities[code] = severity;
+
+    if( !changes.empty() )
+        bumpRevision();
+
+    return ercSeverities();
 }
 
 

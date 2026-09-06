@@ -52,7 +52,14 @@
 #include <pcb_marker.h>
 #include <pcb_point.h>
 #include <kiway.h>
+#include <drc/drc_engine.h>
 #include <drc/drc_item.h>
+#include <drawing_sheet/ds_proxy_view_item.h>
+#include <footprint_library_adapter.h>
+#include <kiface_ids.h>
+#include <netlist_reader/netlist_reader.h>
+#include <project_pcb.h>
+#include <richio.h>
 #include <jobs/job_export_pcb_3d.h>
 #include <jobs/job_export_pcb_dxf.h>
 #include <jobs/job_export_pcb_drill.h>
@@ -148,6 +155,11 @@ API_HANDLER_PCB::API_HANDLER_PCB( std::shared_ptr<PCB_CONTEXT> aContext, PCB_EDI
     registerHandler<SetBoardPlotSettings, Empty>( &API_HANDLER_PCB::handleSetBoardPlotSettings );
     registerHandler<InjectDrcError, InjectDrcErrorResponse>(
             &API_HANDLER_PCB::handleInjectDrcError );
+    registerHandler<RunBoardJobDrc, DrcResultsResponse>( &API_HANDLER_PCB::handleRunBoardJobDrc );
+    registerHandler<GetDrcMarkers, DrcResultsResponse>( &API_HANDLER_PCB::handleGetDrcMarkers );
+    registerHandler<SetDrcMarkerExcluded, Empty>( &API_HANDLER_PCB::handleSetDrcMarkerExcluded );
+    registerHandler<GetDrcSeverities, DrcSeveritiesResponse>( &API_HANDLER_PCB::handleGetDrcSeverities );
+    registerHandler<SetDrcSeverities, DrcSeveritiesResponse>( &API_HANDLER_PCB::handleSetDrcSeverities );
 
     registerHandler<GetVariants, VariantsResponse>( &API_HANDLER_PCB::handleGetVariants );
     registerHandler<AddVariant, Empty>( &API_HANDLER_PCB::handleAddVariant );
@@ -2148,6 +2160,391 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleSetBoardPlotSettings( const HANDLER
 }
 
 
+void API_HANDLER_PCB::collectDrcMarkers( DrcResultsResponse& aResponse ) const
+{
+    uint32_t errors = 0, warnings = 0, exclusions = 0, unconnected = 0, parity = 0;
+
+    for( const PCB_MARKER* marker : board()->Markers() )
+    {
+        if( !marker->GetRCItem() )
+            continue;
+
+        google::protobuf::Any any;
+        marker->Serialize( any );
+
+        board::DrcMarker* msg = aResponse.add_markers();
+        any.UnpackTo( msg );
+
+        SEVERITY severity = marker->GetSeverity();
+
+        msg->mutable_id()->set_value( marker->m_Uuid.AsStdString() );
+        msg->set_severity( ToProtoEnum<SEVERITY, types::RuleSeverity>( severity ) );
+        msg->set_excluded( marker->IsExcluded() );
+        msg->set_exclusion_comment( marker->GetComment().ToUTF8() );
+        msg->set_description( marker->GetRCItem()->GetErrorMessage( true ).ToUTF8() );
+
+        switch( severity )
+        {
+        case RPT_SEVERITY_ERROR:     ++errors;     break;
+        case RPT_SEVERITY_WARNING:   ++warnings;   break;
+        case RPT_SEVERITY_EXCLUSION: ++exclusions; break;
+        default:                                   break;
+        }
+
+        if( marker->GetMarkerType() == MARKER_BASE::MARKER_RATSNEST )
+            ++unconnected;
+        else if( marker->GetMarkerType() == MARKER_BASE::MARKER_PARITY )
+            ++parity;
+    }
+
+    aResponse.set_error_count( errors );
+    aResponse.set_warning_count( warnings );
+    aResponse.set_exclusion_count( exclusions );
+    aResponse.set_unconnected_count( unconnected );
+    aResponse.set_parity_count( parity );
+}
+
+
+HANDLER_RESULT<DrcResultsResponse> API_HANDLER_PCB::handleGetDrcMarkers( const HANDLER_CONTEXT<GetDrcMarkers>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    DrcResultsResponse response;
+    collectDrcMarkers( response );
+    return response;
+}
+
+
+HANDLER_RESULT<DrcResultsResponse> API_HANDLER_PCB::handleRunBoardJobDrc( const HANDLER_CONTEXT<RunBoardJobDrc>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    // Markers are rebuilt from scratch, which would leave staged changes pointing at freed items
+    for( const auto& [client, commit] : m_commits )
+    {
+        if( commit.second && !commit.second->Empty() )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BUSY );
+            e.set_error_message( fmt::format( "cannot run DRC while client '{}' has uncommitted changes", client ) );
+            return tl::unexpected( e );
+        }
+    }
+
+    BOARD*                      brd = board();
+    std::shared_ptr<DRC_ENGINE> drcEngine = brd->GetDesignSettings().m_DRCEngine;
+
+    if( !drcEngine )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_UNKNOWN );
+        e.set_error_message( "the board has no DRC engine" );
+        return tl::unexpected( e );
+    }
+
+    // Running DRC requires libraries be loaded, so make sure they have been
+    FOOTPRINT_LIBRARY_ADAPTER* adapter = PROJECT_PCB::FootprintLibAdapter( brd->GetProject() );
+    adapter->AsyncLoad();
+    adapter->BlockUntilLoaded();
+
+    // Schematic parity: from an explicit netlist file, or by netlisting the project's schematic
+    std::unique_ptr<NETLIST> netlist;
+    bool                     checkParity = aCtx.Request.test_footprints_against_schematic();
+
+    if( checkParity )
+    {
+        std::string netlistStr;
+        wxString    netlistPath = wxString::FromUTF8( aCtx.Request.schematic_netlist_path() );
+
+        if( !netlistPath.IsEmpty() )
+        {
+            wxFileName fn( project().AbsolutePath( netlistPath ) );
+
+            if( !fn.FileExists() )
+            {
+                ApiResponseStatus e;
+                e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+                e.set_error_message( fmt::format( "netlist file '{}' does not exist",
+                                                  fn.GetFullPath().ToStdString() ) );
+                return tl::unexpected( e );
+            }
+
+            wxFFile file( fn.GetFullPath(), wxS( "rb" ) );
+            wxString contents;
+
+            if( !file.IsOpened() || !file.ReadAll( &contents ) )
+            {
+                ApiResponseStatus e;
+                e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+                e.set_error_message( fmt::format( "could not read netlist file '{}'",
+                                                  fn.GetFullPath().ToStdString() ) );
+                return tl::unexpected( e );
+            }
+
+            netlistStr = contents.ToStdString();
+        }
+        else
+        {
+            KIWAY* kiway = pcbContext()->GetKiway();
+
+            if( kiway && kiway->Player( FRAME_SCH, false ) )
+            {
+                kiway->ExpressMail( FRAME_SCH, MAIL_SCH_GET_NETLIST, netlistStr );
+            }
+            else if( kiway )
+            {
+                wxFileName schematicPath( brd->GetFileName() );
+                schematicPath.MakeAbsolute();
+                schematicPath.SetExt( FILEEXT::KiCadSchematicFileExtension );
+
+                if( !schematicPath.Exists() )
+                {
+                    ApiResponseStatus e;
+                    e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+                    e.set_error_message( "schematic parity requires a schematic next to the board or "
+                                         "schematic_netlist_path" );
+                    return tl::unexpected( e );
+                }
+
+                typedef bool ( *NETLIST_FN_PTR )( const wxString&, std::string& );
+                KIFACE*        eeschema = kiway->KiFACE( KIWAY::FACE_SCH );
+                NETLIST_FN_PTR netlister = (NETLIST_FN_PTR) eeschema->IfaceOrAddress( KIFACE_NETLIST_SCHEMATIC );
+                ( *netlister )( schematicPath.GetFullPath(), netlistStr );
+            }
+            else
+            {
+                ApiResponseStatus e;
+                e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+                e.set_error_message( "schematic parity requires schematic_netlist_path in this context" );
+                return tl::unexpected( e );
+            }
+        }
+
+        if( netlistStr.empty() || netlistStr == MAIL_SCH_GET_NETLIST_CANCELLED )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( "could not obtain a schematic netlist for the parity checks "
+                                 "(the schematic must be fully annotated)" );
+            return tl::unexpected( e );
+        }
+
+        try
+        {
+            netlist = std::make_unique<NETLIST>();
+            STRING_LINE_READER*  lineReader = new STRING_LINE_READER( netlistStr, _( "Eeschema netlist" ) );
+            KICAD_NETLIST_READER netlistReader( lineReader, netlist.get() );
+
+            netlistReader.LoadNetlist();
+        }
+        catch( const IO_ERROR& ioe )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( fmt::format( "could not parse the schematic netlist: {}",
+                                              ioe.What().ToStdString() ) );
+            return tl::unexpected( e );
+        }
+
+        drcEngine->SetSchematicNetlist( netlist.get() );
+    }
+
+    if( aCtx.Request.refill_zones() )
+    {
+        TOOL_MANAGER* mgr = toolManager();
+
+        if( !mgr->FindTool( ZONE_FILLER_TOOL_NAME ) )
+            mgr->RegisterTool( new ZONE_FILLER_TOOL );
+
+        mgr->GetTool<ZONE_FILLER_TOOL>()->FillAllZones( nullptr, nullptr, true );
+    }
+
+    // The drawing sheet proxy lets the text-variable checks see the sheet, as the CLI job does
+    std::unique_ptr<DS_PROXY_VIEW_ITEM> drawingSheet = std::make_unique<DS_PROXY_VIEW_ITEM>(
+            pcbIUScale, &brd->GetPageSettings(), brd->GetProject(), &brd->GetTitleBlock(), &brd->GetProperties() );
+
+    drawingSheet->SetSheetName( std::string() );
+    drawingSheet->SetSheetPath( std::string() );
+    drawingSheet->SetIsFirstPage( true );
+    drawingSheet->SetFileName( TO_UTF8( brd->GetFileName() ) );
+
+    wxString currentVariant = brd->GetCurrentVariant();
+    drawingSheet->SetVariantName( TO_UTF8( currentVariant ) );
+    drawingSheet->SetVariantDesc( TO_UTF8( brd->GetVariantDescription( currentVariant ) ) );
+
+    drcEngine->SetDrawingSheet( drawingSheet.get() );
+    drcEngine->SetProgressReporter( nullptr );
+
+    BOARD_COMMIT commit( toolManager() );
+
+    drcEngine->SetViolationHandler(
+            [&]( const std::shared_ptr<DRC_ITEM>& aItem, const VECTOR2I& aPos, int aLayer,
+                 const std::function<void( PCB_MARKER* )>& aPathGenerator )
+            {
+                PCB_MARKER* marker = new PCB_MARKER( aItem, aPos, aLayer );
+                aPathGenerator( marker );
+                commit.Add( marker );
+            } );
+
+    brd->RecordDRCExclusions();
+    brd->DeleteMARKERs( true, true );
+    drcEngine->RunTests( EDA_UNITS::MM, aCtx.Request.report_all_track_errors(), checkParity );
+    drcEngine->ClearViolationHandler();
+    drcEngine->SetDrawingSheet( nullptr );
+    drcEngine->SetSchematicNetlist( nullptr );
+
+    commit.Push( _( "DRC" ), SKIP_UNDO | SKIP_SET_DIRTY );
+
+    // Update the exclusion status on any excluded markers that still exist.
+    brd->ResolveDRCExclusions( false );
+
+    bumpRevision();
+
+    DrcResultsResponse response;
+    collectDrcMarkers( response );
+    return response;
+}
+
+
+HANDLER_RESULT<Empty> API_HANDLER_PCB::handleSetDrcMarkerExcluded( const HANDLER_CONTEXT<SetDrcMarkerExcluded>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    std::vector<PCB_MARKER*> markers;
+
+    for( const types::KIID& id : aCtx.Request.markers() )
+    {
+        KIID        kiid( id.value() );
+        PCB_MARKER* found = nullptr;
+
+        for( PCB_MARKER* marker : board()->Markers() )
+        {
+            if( marker->m_Uuid == kiid )
+            {
+                found = marker;
+                break;
+            }
+        }
+
+        if( !found )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( fmt::format( "marker {} not found on the board", id.value() ) );
+            return tl::unexpected( e );
+        }
+
+        markers.push_back( found );
+    }
+
+    wxString comment = wxString::FromUTF8( aCtx.Request.comment() );
+
+    for( PCB_MARKER* marker : markers )
+    {
+        marker->SetExcluded( aCtx.Request.excluded(), aCtx.Request.excluded() ? comment : wxString() );
+
+        if( frame() && frame()->GetCanvas() )
+            frame()->GetCanvas()->GetView()->Update( marker );
+    }
+
+    board()->RecordDRCExclusions();
+    bumpRevision();
+
+    return Empty();
+}
+
+
+DrcSeveritiesResponse API_HANDLER_PCB::drcSeverities() const
+{
+    DrcSeveritiesResponse  response;
+    BOARD_DESIGN_SETTINGS& bds = board()->GetDesignSettings();
+
+    for( const RC_ITEM& item : DRC_ITEM::GetItemsWithSeverities() )
+    {
+        PCB_DRC_CODE code = static_cast<PCB_DRC_CODE>( item.GetErrorCode() );
+
+        board::DrcSeveritySetting* setting = response.add_severities();
+        setting->set_rule_type( ToProtoEnum<PCB_DRC_CODE, board::DrcErrorType>( code ) );
+        setting->set_severity( ToProtoEnum<SEVERITY, types::RuleSeverity>( bds.GetSeverity( code ) ) );
+    }
+
+    return response;
+}
+
+
+HANDLER_RESULT<DrcSeveritiesResponse> API_HANDLER_PCB::handleGetDrcSeverities(
+        const HANDLER_CONTEXT<GetDrcSeverities>& aCtx )
+{
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    return drcSeverities();
+}
+
+
+HANDLER_RESULT<DrcSeveritiesResponse> API_HANDLER_PCB::handleSetDrcSeverities(
+        const HANDLER_CONTEXT<SetDrcSeverities>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.board() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    const std::unordered_set<SEVERITY> permitted( { RPT_SEVERITY_ERROR, RPT_SEVERITY_WARNING, RPT_SEVERITY_IGNORE } );
+    std::map<int, SEVERITY>            changes;
+
+    for( const board::DrcSeveritySetting& setting : aCtx.Request.severities() )
+    {
+        PCB_DRC_CODE code = FromProtoEnum<PCB_DRC_CODE, board::DrcErrorType>( setting.rule_type() );
+        SEVERITY     severity = FromProtoEnum<SEVERITY, types::RuleSeverity>( setting.severity() );
+
+        if( setting.rule_type() == board::DRCET_UNKNOWN || !permitted.contains( severity ) )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( "DRC severities need a valid rule type and a severity of error, warning, "
+                                 "or ignore" );
+            return tl::unexpected( e );
+        }
+
+        changes[code] = severity;
+    }
+
+    BOARD_DESIGN_SETTINGS& bds = board()->GetDesignSettings();
+
+    for( const auto& [code, severity] : changes )
+        bds.m_DRCSeverities[code] = severity;
+
+    if( !changes.empty() )
+        bumpRevision();
+
+    return drcSeverities();
+}
+
+
 HANDLER_RESULT<InjectDrcErrorResponse> API_HANDLER_PCB::handleInjectDrcError(
         const HANDLER_CONTEXT<InjectDrcError>& aCtx )
 {
@@ -2180,10 +2577,8 @@ HANDLER_RESULT<InjectDrcErrorResponse> API_HANDLER_PCB::handleInjectDrcError(
 
     PCB_MARKER* marker = new PCB_MARKER( drcItem, position, layer );
 
-    COMMIT* commit = getCurrentCommit( aCtx.ClientName );
-    commit->Add( marker );
-    commit->Push( wxS( "API injected DRC marker" ) );
-    bumpRevision();
+    getCurrentCommit( aCtx.ClientName )->Add( marker );
+    pushCurrentCommit( aCtx.ClientName, wxS( "API injected DRC marker" ) );
 
     InjectDrcErrorResponse response;
     response.mutable_marker()->set_value( marker->GetUUID().AsStdString() );

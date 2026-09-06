@@ -38,6 +38,7 @@
 #include <api/common/types/base_types.pb.h>
 
 #include <board.h>
+#include <drc/drc_item.h>
 #include <board_design_settings.h>
 #include <board_stackup_manager/board_stackup.h>
 #include <connectivity/connectivity_data.h>
@@ -689,6 +690,194 @@ BOOST_AUTO_TEST_CASE( GetDocumentRevisionTracksChanges )
     result = handler.Handle( request );
     BOOST_REQUIRE( !result.has_value() );
     BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_UNHANDLED );
+}
+
+
+BOOST_AUTO_TEST_CASE( RunBoardJobDrcPopulatesMarkers )
+{
+    BOARD* board = loadBoard( wxS( "api_kitchen_sink" ) );
+
+    API_HANDLER_PCB handler( m_context );
+
+    auto handle = [&]( const auto& aCommand, auto& aResponse )
+    {
+        kiapi::common::ApiRequest request = makeRequest( aCommand );
+        API_RESULT                result = handler.Handle( request );
+
+        BOOST_REQUIRE_MESSAGE( result.has_value(), "request failed: " << result.error().error_message() );
+        BOOST_REQUIRE( result->message().UnpackTo( &aResponse ) );
+    };
+
+    // Nothing has been checked yet
+    kiapi::board::commands::GetDrcMarkers get;
+    *get.mutable_board() = pcbDocument( board );
+
+    kiapi::board::commands::DrcResultsResponse before;
+    handle( get, before );
+    BOOST_CHECK_EQUAL( before.markers_size(), static_cast<int>( board->Markers().size() ) );
+
+    // The kitchen sink has violations; running DRC places markers on the board
+    kiapi::board::commands::RunBoardJobDrc run;
+    *run.mutable_board() = pcbDocument( board );
+    run.set_report_all_track_errors( true );
+
+    kiapi::board::commands::DrcResultsResponse results;
+    handle( run, results );
+
+    BOOST_CHECK_GT( results.markers_size(), 0 );
+    BOOST_CHECK_EQUAL( results.markers_size(), static_cast<int>( board->Markers().size() ) );
+    BOOST_CHECK_EQUAL( results.error_count() + results.warning_count() + results.exclusion_count(),
+                       static_cast<uint32_t>( results.markers_size() ) );
+
+    // Every marker carries its identity and effective severity
+    for( const kiapi::board::DrcMarker& marker : results.markers() )
+    {
+        BOOST_CHECK( !marker.id().value().empty() );
+        BOOST_CHECK( marker.severity() != kiapi::common::types::RS_UNKNOWN );
+        BOOST_CHECK( !marker.description().empty() );
+        BOOST_CHECK( !marker.excluded() );
+    }
+
+    // GetDrcMarkers reports the same set without re-running
+    kiapi::board::commands::DrcResultsResponse after;
+    handle( get, after );
+    BOOST_CHECK_EQUAL( after.markers_size(), results.markers_size() );
+    BOOST_CHECK_EQUAL( after.error_count(), results.error_count() );
+
+    // Excluding a marker moves it into the exclusion count and records the exclusion
+    kiapi::board::commands::SetDrcMarkerExcluded exclude;
+    *exclude.mutable_board() = pcbDocument( board );
+    *exclude.add_markers() = results.markers( 0 ).id();
+    exclude.set_excluded( true );
+    exclude.set_comment( "known" );
+
+    google::protobuf::Empty empty;
+    handle( exclude, empty );
+    handle( get, after );
+
+    BOOST_CHECK_EQUAL( after.exclusion_count(), 1u );
+    BOOST_CHECK_EQUAL( after.error_count() + after.warning_count(), results.error_count() + results.warning_count() - 1 );
+    BOOST_CHECK_EQUAL( board->GetDesignSettings().m_DrcExclusions.size(), 1u );
+
+    bool sawExcluded = false;
+
+    for( const kiapi::board::DrcMarker& marker : after.markers() )
+    {
+        if( marker.id().value() == results.markers( 0 ).id().value() )
+        {
+            sawExcluded = true;
+            BOOST_CHECK( marker.excluded() );
+            BOOST_CHECK_EQUAL( marker.exclusion_comment(), "known" );
+            BOOST_CHECK_EQUAL( marker.severity(), kiapi::common::types::RS_EXCLUSION );
+        }
+    }
+
+    BOOST_CHECK( sawExcluded );
+
+    // Exclusions survive a re-run
+    handle( run, results );
+    BOOST_CHECK_EQUAL( results.exclusion_count(), 1u );
+
+    // An injected marker is reported until the next run replaces the markers
+    kiapi::board::commands::InjectDrcError inject;
+    *inject.mutable_board() = pcbDocument( board );
+    inject.set_severity( kiapi::board::commands::DRS_ERROR );
+    inject.set_message( "injected" );
+    inject.mutable_position()->set_x_nm( 1000000 );
+    inject.mutable_position()->set_y_nm( 1000000 );
+
+    kiapi::board::commands::InjectDrcErrorResponse injected;
+    handle( inject, injected );
+    handle( get, after );
+    BOOST_CHECK_EQUAL( after.markers_size(), results.markers_size() + 1 );
+
+    // Injecting pushes its own commit, so a run is not blocked afterwards, and an open commit
+    // without staged changes does not block it either
+    kiapi::common::ApiRequest beginRequest = makeBeginCommitRequest();
+    API_RESULT                begin = handler.Handle( beginRequest );
+    BOOST_REQUIRE( begin.has_value() );
+
+    handle( run, after );
+    BOOST_CHECK_EQUAL( after.markers_size(), results.markers_size() );
+
+    for( const kiapi::board::DrcMarker& marker : after.markers() )
+        BOOST_CHECK_NE( marker.description(), "injected" );
+
+    kiapi::common::commands::BeginCommitResponse beginResponse;
+    BOOST_REQUIRE( begin->message().UnpackTo( &beginResponse ) );
+
+    kiapi::common::commands::EndCommit end;
+    *end.mutable_id() = beginResponse.id();
+    end.set_action( kiapi::common::commands::CMA_DROP );
+
+    kiapi::common::commands::EndCommitResponse ended;
+    handle( end, ended );
+
+    // Unknown markers are an error
+    exclude.mutable_markers( 0 )->set_value( "deadbeef-0000-0000-0000-000000000000" );
+    kiapi::common::ApiRequest request = makeRequest( exclude );
+    API_RESULT                result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_BAD_REQUEST );
+}
+
+
+BOOST_AUTO_TEST_CASE( DrcSeveritiesRoundTrip )
+{
+    BOARD* board = loadBoard( wxS( "api_kitchen_sink" ) );
+
+    API_HANDLER_PCB handler( m_context );
+
+    auto handle = [&]( const auto& aCommand, auto& aResponse )
+    {
+        kiapi::common::ApiRequest request = makeRequest( aCommand );
+        API_RESULT                result = handler.Handle( request );
+
+        BOOST_REQUIRE_MESSAGE( result.has_value(), "request failed: " << result.error().error_message() );
+        BOOST_REQUIRE( result->message().UnpackTo( &aResponse ) );
+    };
+
+    kiapi::board::commands::GetDrcSeverities get;
+    *get.mutable_board() = pcbDocument( board );
+
+    kiapi::board::commands::DrcSeveritiesResponse severities;
+    handle( get, severities );
+
+    // Every user-settable rule type is listed once
+    BOOST_CHECK_EQUAL( severities.severities_size(), static_cast<int>( DRC_ITEM::GetItemsWithSeverities().size() ) );
+
+    std::set<int> seen;
+
+    for( const kiapi::board::DrcSeveritySetting& setting : severities.severities() )
+    {
+        BOOST_CHECK( setting.rule_type() != kiapi::board::DRCET_UNKNOWN );
+        BOOST_CHECK( seen.insert( setting.rule_type() ).second );
+    }
+
+    // Change one; the others keep their value
+    kiapi::board::commands::SetDrcSeverities set;
+    *set.mutable_board() = pcbDocument( board );
+    kiapi::board::DrcSeveritySetting* change = set.add_severities();
+    change->set_rule_type( kiapi::board::DRCET_CLEARANCE );
+    change->set_severity( kiapi::common::types::RS_IGNORE );
+
+    kiapi::board::commands::DrcSeveritiesResponse updated;
+    handle( set, updated );
+    BOOST_CHECK_EQUAL( updated.severities_size(), severities.severities_size() );
+    BOOST_CHECK_EQUAL( board->GetDesignSettings().GetSeverity( DRCE_CLEARANCE ), RPT_SEVERITY_IGNORE );
+
+    for( const kiapi::board::DrcSeveritySetting& setting : updated.severities() )
+    {
+        if( setting.rule_type() == kiapi::board::DRCET_CLEARANCE )
+            BOOST_CHECK_EQUAL( setting.severity(), kiapi::common::types::RS_IGNORE );
+    }
+
+    // Exclusion is not a valid severity to set
+    change->set_severity( kiapi::common::types::RS_EXCLUSION );
+    kiapi::common::ApiRequest request = makeRequest( set );
+    API_RESULT                result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_BAD_REQUEST );
 }
 
 

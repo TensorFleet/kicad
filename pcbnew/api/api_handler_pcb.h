@@ -133,6 +133,21 @@ private:
     HANDLER_RESULT<InjectDrcErrorResponse> handleInjectDrcError(
             const HANDLER_CONTEXT<InjectDrcError>& aCtx );
 
+    HANDLER_RESULT<DrcResultsResponse> handleRunBoardJobDrc( const HANDLER_CONTEXT<RunBoardJobDrc>& aCtx );
+
+    HANDLER_RESULT<DrcResultsResponse> handleGetDrcMarkers( const HANDLER_CONTEXT<GetDrcMarkers>& aCtx );
+
+    HANDLER_RESULT<Empty> handleSetDrcMarkerExcluded( const HANDLER_CONTEXT<SetDrcMarkerExcluded>& aCtx );
+
+    HANDLER_RESULT<DrcSeveritiesResponse> handleGetDrcSeverities( const HANDLER_CONTEXT<GetDrcSeverities>& aCtx );
+
+    HANDLER_RESULT<DrcSeveritiesResponse> handleSetDrcSeverities( const HANDLER_CONTEXT<SetDrcSeverities>& aCtx );
+
+    /// Fill a DrcResultsResponse from the markers currently on the board
+    void collectDrcMarkers( DrcResultsResponse& aResponse ) const;
+
+    DrcSeveritiesResponse drcSeverities() const;
+
     HANDLER_RESULT<types::RunJobResponse> handleRunBoardJobExport3D(
             const HANDLER_CONTEXT<RunBoardJobExport3D>& aCtx );
 
