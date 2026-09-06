@@ -31,6 +31,7 @@
 #include <api/api_handler.h>
 #include <api/api_utils.h> // traceApi
 #include <api/api_server.h>
+#include <ki_exception.h>
 #include <kiid.h>
 #include <kinng.h>
 #include <paths.h>
@@ -545,20 +546,40 @@ API_RESULT KICAD_API_SERVER::Dispatch( ApiRequest& aRequest )
 {
     API_RESULT result;
 
-    // Indexed rather than iterator-based: a handler may register or deregister other handlers
-    // while it runs (OpenDocument / CloseDocument), which invalidates iterators.
-    for( size_t i = 0; i < m_handlers.size(); ++i )
+    // A handler that throws must still produce a reply: the request/reply socket cannot receive
+    // the next request until this one is answered, so an escaped exception would wedge the
+    // server for every later client.
+    try
     {
-        result = m_handlers[i]->Handle( aRequest );
+        // Indexed rather than iterator-based: a handler may register or deregister other handlers
+        // while it runs (OpenDocument / CloseDocument), which invalidates iterators.
+        for( size_t i = 0; i < m_handlers.size(); ++i )
+        {
+            result = m_handlers[i]->Handle( aRequest );
 
-        if( result.has_value() )
-            break;
-        else if( result.error().status() != ApiStatusCode::AS_UNHANDLED )
-            break;
+            if( result.has_value() )
+                break;
+            else if( result.error().status() != ApiStatusCode::AS_UNHANDLED )
+                break;
+        }
+
+        if( !result.has_value() && result.error().status() == ApiStatusCode::AS_UNHANDLED )
+            result = m_fallbackHandler->Handle( aRequest );
     }
-
-    if( !result.has_value() && result.error().status() == ApiStatusCode::AS_UNHANDLED )
-        result = m_fallbackHandler->Handle( aRequest );
+    catch( const IO_ERROR& ioe )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( fmt::format( "request failed: {}", ioe.What().ToUTF8().data() ) );
+        result = tl::unexpected( e );
+    }
+    catch( const std::exception& exc )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( fmt::format( "request failed: {}", exc.what() ) );
+        result = tl::unexpected( e );
+    }
 
     return result;
 }

@@ -23,6 +23,7 @@
 
 #include <string_utils.h>
 
+#include <api/api_utils.h> // traceApi
 #include <trace_helpers.h>
 #include <connection_graph.h>
 #include <kiface_ids.h>
@@ -244,7 +245,21 @@ const std::set<wxString>& NETLIST_EXPORTER_BASE::footprintPads( const wxString& 
 
     if( m_kiway && !aFootprintId.IsEmpty() )
     {
-        if( KIFACE* cvpcb = m_kiway->KiFACE( KIWAY::FACE_CVPCB ) )
+        KIFACE* cvpcb = nullptr;
+
+        // Pad numbers come from the footprint library through the cvpcb kiface.  Without it
+        // (a partial install, or a build without cvpcb) the netlist falls back to the symbol's
+        // pin numbers rather than failing.
+        try
+        {
+            cvpcb = m_kiway->KiFACE( KIWAY::FACE_CVPCB );
+        }
+        catch( const IO_ERROR& ioe )
+        {
+            wxLogTrace( traceApi, wxS( "footprint pad numbers unavailable: %s" ), ioe.What() );
+        }
+
+        if( cvpcb )
         {
             typedef void ( *PAD_NUMBERS_FN_PTR )( const wxString&, PROJECT*, std::set<wxString>& );
 
