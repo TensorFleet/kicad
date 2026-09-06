@@ -342,6 +342,58 @@ BOOST_AUTO_TEST_CASE( SaveAndParseItemsAsString )
 }
 
 
+// Since 11.0: the schematic handler lists its actions; none of them runs headless yet, so
+// RunAction refuses them cleanly and passes other editors' actions on.
+BOOST_AUTO_TEST_CASE( GetActionsAndHeadlessRunAction )
+{
+    SCHEMATIC* schematic = loadSchematic( wxS( "api_kitchen_sink" ) );
+
+    API_HANDLER_SCH handler( m_context );
+
+    kiapi::common::commands::GetActions getActions;
+    *getActions.mutable_document() = makeDocument( *schematic );
+
+    kiapi::common::ApiRequest request;
+    request.mutable_header()->set_client_name( "kicad.qa" );
+    BOOST_REQUIRE( request.mutable_message()->PackFrom( getActions ) );
+
+    API_RESULT result = handler.Handle( request );
+    BOOST_REQUIRE_MESSAGE( result.has_value(), result.error().error_message() );
+
+    kiapi::common::commands::GetActionsResponse actions;
+    BOOST_REQUIRE( result->message().UnpackTo( &actions ) );
+    BOOST_REQUIRE_GT( actions.actions_size(), 0 );
+
+    bool sawAnnotate = false;
+
+    for( const kiapi::common::commands::ActionInfo& info : actions.actions() )
+    {
+        BOOST_CHECK( info.name().starts_with( "eeschema." ) || info.name().starts_with( "common." ) );
+        BOOST_CHECK( !info.headless_capable() );
+
+        if( info.name() == "eeschema.EditorControl.annotate" )
+            sawAnnotate = true;
+    }
+
+    BOOST_CHECK( sawAnnotate );
+
+    kiapi::common::commands::RunAction run;
+    run.set_action( "eeschema.EditorControl.annotate" );
+    BOOST_REQUIRE( request.mutable_message()->PackFrom( run ) );
+
+    result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_UNIMPLEMENTED );
+
+    run.set_action( "pcbnew.GlobalEdit.cleanupTracksAndVias" );
+    BOOST_REQUIRE( request.mutable_message()->PackFrom( run ) );
+
+    result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_UNHANDLED );
+}
+
+
 BOOST_AUTO_TEST_CASE( CustomPropertyCannotDuplicateSystemProperty )
 {
     SCHEMATIC* schematic = loadSchematic( wxS( "api_kitchen_sink" ) );

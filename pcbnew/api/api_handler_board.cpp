@@ -44,8 +44,10 @@
 #include <layer_ids.h>
 #include <project.h>
 #include <tool/tool_manager.h>
+#include <tools/global_edit_tool.h>
 #include <tools/pcb_actions.h>
 #include <tools/pcb_selection_tool.h>
+#include <tools/zone_filler_tool.h>
 #include <widgets/appearance_controls.h>
 
 #include <api/common/types/base_types.pb.h>
@@ -63,8 +65,6 @@ API_HANDLER_BOARD::API_HANDLER_BOARD( std::shared_ptr<BOARD_CONTEXT> aContext,
         m_context( std::move( aContext ) )
 {
     wxCHECK( m_context, /* void */ );
-
-    registerHandler<RunAction, RunActionResponse>( &API_HANDLER_BOARD::handleRunAction, HANDLER_MODE::GUI_ONLY );
 
     registerHandler<GetItemsById, GetItemsResponse>( &API_HANDLER_BOARD::handleGetItemsById );
 
@@ -501,23 +501,49 @@ std::vector<KICAD_T> API_HANDLER_BOARD::parseRequestedItemTypes(
 }
 
 
-HANDLER_RESULT<RunActionResponse> API_HANDLER_BOARD::handleRunAction(
-        const HANDLER_CONTEXT<RunAction>& aCtx )
+const std::set<std::string>& API_HANDLER_BOARD::headlessActions() const
 {
-    if( std::optional<ApiResponseStatus> headless = checkForHeadless( "RunAction" ) )
-        return tl::unexpected( *headless );
+    // Actions whose tools have a path that neither opens a dialog nor needs a canvas; see
+    // ensureHeadlessTools for the tools behind them
+    static const std::set<std::string> actions = {
+        PCB_ACTIONS::zoneFillAll.GetName(),
+        PCB_ACTIONS::zoneUnfillAll.GetName(),
+        PCB_ACTIONS::cleanupTracksAndVias.GetName(),
+        PCB_ACTIONS::cleanupGraphics.GetName(),
+    };
 
-    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
-        return tl::unexpected( *busy );
+    return actions;
+}
 
-    RunActionResponse response;
 
-    if( toolManager()->RunAction( aCtx.Request.action(), true ) )
-        response.set_status( RunActionStatus::RAS_OK );
-    else
-        response.set_status( RunActionStatus::RAS_INVALID );
+void API_HANDLER_BOARD::ensureHeadlessTools()
+{
+    if( m_frame )
+        return;
 
-    return response;
+    TOOL_MANAGER* mgr = toolManager();
+    bool          added = false;
+
+    if( !mgr->FindTool( ZONE_FILLER_TOOL_NAME ) )
+    {
+        mgr->RegisterTool( new ZONE_FILLER_TOOL );
+        added = true;
+    }
+
+    if( !mgr->FindTool( "pcbnew.GlobalEdit" ) )
+    {
+        mgr->RegisterTool( new GLOBAL_EDIT_TOOL );
+        added = true;
+    }
+
+    // Tools only get their event transitions from a reset; RefillZones may have registered the
+    // zone filler without one (it calls the tool directly), so reset whenever the set grew.
+    // InitTools is not usable here: PCB_TOOL_BASE::Init builds the context menu on the frame.
+    if( added || !m_headlessToolsInitialized )
+    {
+        mgr->ResetTools( TOOL_BASE::RUN );
+        m_headlessToolsInitialized = true;
+    }
 }
 
 

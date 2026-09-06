@@ -30,6 +30,8 @@
 #include <google/protobuf/empty.pb.h>
 #include <kiid.h>
 #include <page_info.h>
+#include <set>
+#include <vector>
 
 using namespace kiapi::common;
 using kiapi::common::types::DocumentSpecifier;
@@ -38,6 +40,7 @@ using kiapi::common::commands::ItemDeletionStatus;
 
 class EDA_BASE_FRAME;
 class TITLE_BLOCK;
+class TOOL_MANAGER;
 
 /**
  * Base class for API handlers related to editor frames
@@ -126,6 +129,37 @@ protected:
 
     HANDLER_RESULT<commands::FocusOnItemResponse> handleFocusOnItem(
             const HANDLER_CONTEXT<commands::FocusOnItem>& aCtx );
+
+    HANDLER_RESULT<commands::RunActionResponse> handleRunAction( const HANDLER_CONTEXT<commands::RunAction>& aCtx );
+
+    HANDLER_RESULT<commands::GetActionsResponse> handleGetActions(
+            const HANDLER_CONTEXT<commands::GetActions>& aCtx );
+
+    /// @return the tool manager actions are run on, or nullptr if the editor has none
+    virtual TOOL_MANAGER* editorToolManager() const { return nullptr; }
+
+    /**
+     * @return the action name prefixes this editor answers RunAction / GetActions for, e.g.
+     *         "pcbnew." and "common." for the board editor.  Actions with other prefixes are
+     *         passed on to the next handler.
+     */
+    virtual std::vector<std::string> actionPrefixes() const { return {}; }
+
+    /**
+     * @return the names of the actions that can run without an editor window.  Everything else
+     *         is refused headless (the tools behind them open dialogs or need a canvas).
+     */
+    virtual const std::set<std::string>& headlessActions() const;
+
+    /**
+     * Register the tools that serve headlessActions() on the headless tool manager, if not done
+     * yet.  Editor frames register every tool themselves; a headless context starts with a bare
+     * tool manager and adds the non-interactive tools on first use.
+     */
+    virtual void ensureHeadlessTools() {}
+
+    /// @return true if aAction starts with one of actionPrefixes()
+    bool ownsAction( const std::string& aAction ) const;
 
     /**
      * Focus the editor window on the item described by aSpec.  Only called when a frame is

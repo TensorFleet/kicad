@@ -444,7 +444,8 @@ int ZONE_FILLER_TOOL::ZoneFill( const TOOL_EVENT& aEvent )
 
 int ZONE_FILLER_TOOL::ZoneFillAll( const TOOL_EVENT& aEvent )
 {
-    FillAllZones( frame() );
+    // No frame: the IPC API is running the action in kicad-cli api-server
+    FillAllZones( frame(), nullptr, frame() == nullptr );
     return 0;
 }
 
@@ -536,6 +537,10 @@ void ZONE_FILLER_TOOL::rebuildConnectivity( bool aHeadless )
 
 void ZONE_FILLER_TOOL::refresh()
 {
+    // Nothing to repaint when the IPC API runs the tool without a frame
+    if( !frame() )
+        return;
+
     // Note: KIGFX::REPAINT isn't enough for things that go from invisible to visible as
     // they won't be found in the view layer's itemset for re-painting.
     canvas()->GetView()->UpdateAllItemsConditionally( KIGFX::ALL,

@@ -105,6 +105,11 @@ protected:
 
     TOOL_MANAGER* toolManager() const { return context()->GetToolManager(); }
 
+    TOOL_MANAGER* editorToolManager() const override { return toolManager(); }
+
+    // No schematic tool runs without a frame yet, so headlessActions() stays empty
+    std::vector<std::string> actionPrefixes() const override { return { "eeschema.", "common." }; }
+
     PROJECT& project() const { return context()->Prj(); }
 
 private:

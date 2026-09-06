@@ -30,6 +30,10 @@
 #include <dialogs/dialog_swap_layers.h>
 #include <dialogs/dialog_unused_pad_layers.h>
 #include <tools/global_edit_tool.h>
+#include <board_commit.h>
+#include <cleanup_item.h>
+#include <graphics_cleaner.h>
+#include <tracks_cleaner.h>
 #include <dialogs/dialog_cleanup_graphics.h>
 #include <dialogs/dialog_migrate_3d_models.h>
 #include <board_design_settings.h>
@@ -204,6 +208,32 @@ int GLOBAL_EDIT_TOOL::EditTracksAndVias( const TOOL_EVENT& aEvent )
 int GLOBAL_EDIT_TOOL::CleanupTracksAndVias( const TOOL_EVENT& aEvent )
 {
     PCB_EDIT_FRAME* editFrame = getEditFrame<PCB_EDIT_FRAME>();
+
+    // Without a frame (kicad-cli api-server) there is nobody to ask: run the cleanup with the
+    // dialog's default options and commit it
+    if( !editFrame )
+    {
+        BOARD_COMMIT   commit( this );
+        TRACKS_CLEANER cleaner( board(), commit );
+
+        std::vector<std::shared_ptr<CLEANUP_ITEM>> items;
+
+        board()->BuildConnectivity();
+
+        cleaner.CleanupBoard( false, &items,
+                              true,     // clean vias
+                              true,     // remove misconnected (short circuits)
+                              true,     // merge segments
+                              true,     // delete unconnected
+                              false,    // delete tracks in pads
+                              true );   // delete dangling vias
+
+        if( !commit.Empty() )
+            commit.Push( _( "Cleanup Tracks and Vias" ) );
+
+        return 0;
+    }
+
     DIALOG_CLEANUP_TRACKS_AND_VIAS dlg( editFrame );
 
     dlg.ShowModal();
@@ -214,6 +244,27 @@ int GLOBAL_EDIT_TOOL::CleanupTracksAndVias( const TOOL_EVENT& aEvent )
 int GLOBAL_EDIT_TOOL::CleanupGraphics( const TOOL_EVENT& aEvent )
 {
     PCB_EDIT_FRAME* editFrame = getEditFrame<PCB_EDIT_FRAME>();
+
+    if( !editFrame )
+    {
+        BOARD_COMMIT     commit( this );
+        GRAPHICS_CLEANER cleaner( board()->Drawings(), nullptr, commit, m_toolMgr );
+
+        std::vector<std::shared_ptr<CLEANUP_ITEM>> items;
+
+        cleaner.CleanupBoard( false, &items,
+                              false,    // merge lines into rectangles
+                              true,     // delete redundant graphics
+                              false,    // merge overlapping pads
+                              false,    // fix board outlines
+                              pcbIUScale.mmToIU( 2 ) );
+
+        if( !commit.Empty() )
+            commit.Push( _( "Cleanup Graphics" ) );
+
+        return 0;
+    }
+
     DIALOG_CLEANUP_GRAPHICS dlg( editFrame, false );
 
     dlg.ShowModal();
