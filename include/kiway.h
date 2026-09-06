@@ -155,8 +155,9 @@ struct KIFACE
     {
         enum class KIND
         {
-            FILE_KIND,   ///< Open the file at #path.
-            FPID_KIND,   ///< Open the library element named by #libId
+            FILE_KIND,    ///< Open the file at #path.
+            FPID_KIND,    ///< Open the library element named by #libId
+            PROJECT_KIND, ///< Serve the project at #path (library access); since 11.0
         };
 
         KIND     kind = KIND::FILE_KIND;

@@ -1,0 +1,310 @@
+/*
+ * This program source code file is part of KiCad, a free EDA CAD application.
+ *
+ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation, either version 3 of the License, or (at your
+ * option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
+ * Library access: library tables, entry listings, and reading/writing library items.
+ *
+ * These commands are served once a project is open (the library tables are project-scoped).
+ * A command names the library type it addresses so that one nickname may exist in more than
+ * one table; the handler for another type answers AS_UNHANDLED and the request moves on.
+ *
+ * Since 11.0
+ */
+
+syntax = "proto3";
+
+package kiapi.common.commands;
+
+import "common/types/base_types.proto";
+import "common/types/wizards.proto";
+import "board/board_types.proto";
+import "schematic/schematic_types.proto";
+
+// Since 11.0
+enum LibraryType
+{
+  LT_UNKNOWN = 0;
+  LT_SYMBOL = 1;
+  LT_FOOTPRINT = 2;
+  LT_DESIGN_BLOCK = 3;
+}
+
+// Since 11.0
+enum LibraryTableScope
+{
+  LTS_UNKNOWN = 0;
+  LTS_GLOBAL = 1;
+  LTS_PROJECT = 2;
+}
+
+// One row of a library table (sym-lib-table, fp-lib-table, design-block-lib-table)
+// Since 11.0
+message LibraryTableRow
+{
+  string nickname = 1;
+
+  // The URI as written in the table; may contain ${VARIABLE} references
+  string uri = 2;
+
+  // Plugin type name, for example "KiCad"
+  string type = 3;
+
+  // Plugin options string, for example "key=value|key2=value2"
+  string options = 4;
+
+  string description = 5;
+
+  LibraryTableScope scope = 6;
+
+  // False when the row is disabled in the table
+  bool enabled = 7;
+
+  // True when the row is hidden from library browsers
+  bool hidden = 8;
+
+  // False when the table could not resolve or validate the row; see error
+  bool ok = 9;
+
+  string error = 10;
+
+  // The URI with environment and project variables expanded.  Only set in responses.
+  string resolved_uri = 11;
+}
+
+// Lists the rows of the global and project library tables of the given type.
+// Returns GetLibraryTablesResponse
+// Since 11.0
+message GetLibraryTables
+{
+  LibraryType type = 1;
+
+  // Restrict to one scope; LTS_UNKNOWN (the default) returns both, global rows first
+  LibraryTableScope scope = 2;
+}
+
+// Since 11.0
+message GetLibraryTablesResponse
+{
+  repeated LibraryTableRow rows = 1;
+}
+
+// Footprint-specific summary of a library entry
+// Since 11.0
+message FootprintEntryInfo
+{
+  uint32 pad_count = 1;
+
+  // Pads with distinct numbers
+  uint32 unique_pad_count = 2;
+
+  kiapi.board.types.FootprintMountingStyle mounting_style = 3;
+
+  // File names of the 3D models attached to the footprint
+  repeated string models = 4;
+}
+
+// Symbol-specific summary of a library entry
+// Since 11.0
+message SymbolEntryInfo
+{
+  uint32 unit_count = 1;
+
+  bool is_power = 2;
+
+  repeated string footprint_filters = 3;
+
+  // Set when the symbol derives from another symbol in the same library
+  string parent_name = 4;
+
+  // Default footprint from the symbol's Footprint field
+  string footprint = 5;
+}
+
+// Since 11.0
+message LibraryEntry
+{
+  kiapi.common.types.LibraryIdentifier id = 1;
+
+  string name = 2;
+
+  string description = 3;
+
+  string keywords = 4;
+
+  oneof info
+  {
+    FootprintEntryInfo footprint = 5;
+    SymbolEntryInfo symbol = 6;
+  }
+}
+
+// Lists the entries of one library.  The library is loaded on demand, so the first call for a
+// large library may take a while.
+// Returns ListLibraryEntriesResponse
+// Since 11.0
+message ListLibraryEntries
+{
+  LibraryType type = 1;
+
+  string nickname = 2;
+
+  // Case-insensitive substring filter applied to the entry name, description, and keywords;
+  // empty returns every entry
+  string filter = 3;
+}
+
+// Since 11.0
+message ListLibraryEntriesResponse
+{
+  repeated LibraryEntry entries = 1;
+}
+
+// Loads one library item.  Returns GetLibraryItemResponse
+// Since 11.0
+message GetLibraryItem
+{
+  LibraryType type = 1;
+
+  kiapi.common.types.LibraryIdentifier id = 2;
+}
+
+// Since 11.0
+message LibraryItem
+{
+  oneof item
+  {
+    // The library definition of a footprint
+    kiapi.board.types.Footprint footprint = 1;
+
+    // The library definition of a symbol, in the same form a DOCTYPE_SYMBOL document serves
+    kiapi.schematic.types.SchematicSymbol symbol = 2;
+  }
+}
+
+// Since 11.0
+message GetLibraryItemResponse
+{
+  kiapi.common.types.LibraryIdentifier id = 1;
+
+  LibraryItem item = 2;
+}
+
+// Writes an item into a library.  The item's own id (if any) is ignored; the destination is
+// taken from id, whose entry_name may be empty to keep the item's name.
+// Returns SaveLibraryItemResponse
+// Since 11.0
+message SaveLibraryItem
+{
+  LibraryType type = 1;
+
+  kiapi.common.types.LibraryIdentifier id = 2;
+
+  LibraryItem item = 3;
+
+  // Replace an existing entry of the same name; when false, an existing entry is an error
+  bool overwrite = 4;
+}
+
+// Since 11.0
+message SaveLibraryItemResponse
+{
+  // The id the item was written under
+  kiapi.common.types.LibraryIdentifier id = 1;
+}
+
+// Deletes an item from a writable library.
+// Since 11.0
+message DeleteLibraryItem
+{
+  LibraryType type = 1;
+
+  kiapi.common.types.LibraryIdentifier id = 2;
+}
+
+// Creates an empty library on disk and adds a row for it to the given table.  The uri is used
+// as written (it may contain ${KIPRJMOD} and other variables); when empty, a KiCad-format
+// library named after the nickname is created in the project folder (project scope) or the
+// user's documents folder (global scope).
+// Returns LibraryTableRow
+// Since 11.0
+message CreateLibrary
+{
+  LibraryType type = 1;
+
+  string nickname = 2;
+
+  string uri = 3;
+
+  LibraryTableScope scope = 4;
+
+  string description = 5;
+}
+
+// Adds (or, when a row with the nickname exists and replace is set, replaces) a row in the
+// global or project library table and saves the table.  The library is not created on disk.
+// Returns LibraryTableRow
+// Since 11.0
+message AddLibraryTableRow
+{
+  LibraryType type = 1;
+
+  LibraryTableScope scope = 2;
+
+  // scope, ok and error are ignored; type defaults to "KiCad" when empty
+  LibraryTableRow row = 3;
+
+  bool replace = 4;
+}
+
+// Removes a row from the global or project library table and saves the table.  The library
+// files are left in place.
+// Since 11.0
+message RemoveLibraryTableRow
+{
+  LibraryType type = 1;
+
+  LibraryTableScope scope = 2;
+
+  string nickname = 3;
+}
+
+// Lists the footprint wizards available to this KiCad instance.
+// Returns ListWizardsResponse
+// Since 11.0
+message ListWizards
+{
+}
+
+// Since 11.0
+message ListWizardsResponse
+{
+  repeated kiapi.common.types.WizardInfo wizards = 1;
+}
+
+// Runs a footprint wizard with the given parameter values (parameters not listed keep their
+// defaults).  Returns kiapi.common.types.WizardGeneratedContent whose content is a
+// kiapi.board.types.Footprint.
+// Since 11.0
+message RunWizard
+{
+  // WizardMetaInfo.identifier from ListWizards
+  string identifier = 1;
+
+  kiapi.common.types.WizardParameterList parameters = 2;
+}

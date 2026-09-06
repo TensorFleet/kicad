@@ -27,6 +27,7 @@
 #include <api/api_server.h>
 #include <api/api_utils.h>
 #include <api/cross_probe_client.h>
+#include <api/api_handler_symbol_library.h>
 #include <api/headless_sch_context.h>
 #include <api/headless_symbol_context.h>
 #include <core/json_serializers.h>
@@ -488,6 +489,10 @@ private:
 
     void closeCurrentDocument( KICAD_API_SERVER* aServer );
     void closeCurrentSymbol( KICAD_API_SERVER* aServer );
+    void closeCurrentProject( KICAD_API_SERVER* aServer );
+
+    /// Serve the symbol library commands for the project at aProjectPath.  Since 11.0.
+    bool handleOpenProject( const wxString& aProjectPath, KICAD_API_SERVER* aServer, wxString* aError );
 
     bool handleOpenSymbol( const wxString& aProjectPath, const LIB_ID& aLibId, KICAD_API_SERVER* aServer,
                            wxString* aError );
@@ -498,6 +503,7 @@ private:
     std::unique_ptr<API_HANDLER_SCH>          m_openHandler;
     std::shared_ptr<HEADLESS_SYMBOL_CONTEXT>  m_openSymbolContext;
     std::unique_ptr<API_HANDLER_SYMBOL>       m_openSymbolHandler;
+    std::unique_ptr<API_HANDLER_SYMBOL_LIBRARY> m_openLibraryHandler;
 
 } kiface( "eeschema", KIWAY::FACE_SCH );
 
@@ -894,6 +900,50 @@ void IFACE::closeCurrentDocument( KICAD_API_SERVER* aServer )
 }
 
 
+void IFACE::closeCurrentProject( KICAD_API_SERVER* aServer )
+{
+    if( m_openLibraryHandler )
+    {
+        if( aServer )
+            aServer->DeregisterHandler( m_openLibraryHandler.get() );
+
+        m_openLibraryHandler.reset();
+    }
+}
+
+
+bool IFACE::handleOpenProject( const wxString& aProjectPath, KICAD_API_SERVER* aServer, wxString* aError )
+{
+    wxFileName projectPath( aProjectPath );
+    projectPath.MakeAbsolute();
+
+    SETTINGS_MANAGER& settingsManager = Pgm().GetSettingsManager();
+    PROJECT*          project = settingsManager.GetProject( projectPath.GetFullPath() );
+
+    if( !project )
+    {
+        if( !settingsManager.LoadProject( projectPath.GetFullPath(), true ) )
+            wxLogTrace( traceApi, "Warning: no project file found for %s", aProjectPath );
+
+        project = settingsManager.GetProject( projectPath.GetFullPath() );
+    }
+
+    if( !project )
+    {
+        if( aError )
+            *aError = wxString::Format( wxS( "Error loading project for %s" ), aProjectPath );
+
+        return false;
+    }
+
+    closeCurrentProject( aServer );
+
+    m_openLibraryHandler = std::make_unique<API_HANDLER_SYMBOL_LIBRARY>( project );
+    aServer->RegisterHandler( m_openLibraryHandler.get() );
+    return true;
+}
+
+
 void IFACE::closeCurrentSymbol( KICAD_API_SERVER* aServer )
 {
     if( m_openSymbolHandler )
@@ -1010,6 +1060,9 @@ bool IFACE::HandleApiOpenDocument( const DOCUMENT_SPEC& aSpec,
     if( aSpec.kind == DOCUMENT_SPEC::KIND::FPID_KIND )
         return handleOpenSymbol( aSpec.path, aSpec.libId, aServer, aError );
 
+    if( aSpec.kind == DOCUMENT_SPEC::KIND::PROJECT_KIND )
+        return handleOpenProject( aSpec.path, aServer, aError );
+
     if( aSpec.path.IsEmpty() )
     {
         if( aError )
@@ -1098,6 +1151,12 @@ bool IFACE::HandleApiOpenDocument( const DOCUMENT_SPEC& aSpec,
 bool IFACE::HandleApiCloseDocument( const DOCUMENT_SPEC& aSpec, KICAD_API_SERVER* aServer, wxString* aError )
 {
     wxCHECK( aServer, false );
+
+    if( aSpec.kind == DOCUMENT_SPEC::KIND::PROJECT_KIND )
+    {
+        closeCurrentProject( aServer );
+        return true;
+    }
 
     if( aSpec.kind == DOCUMENT_SPEC::KIND::FPID_KIND )
     {
