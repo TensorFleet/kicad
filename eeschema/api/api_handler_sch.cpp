@@ -63,6 +63,7 @@
 #include <io/kicad/kicad_io_utils.h>
 #include <richio.h>
 #include <sch_io/kicad_sexpr/sch_io_kicad_sexpr.h>
+#include <wx/tokenzr.h>
 #include <project.h>
 #include <wildcards_and_files_ext.h>
 #include <wx/filename.h>
@@ -865,7 +866,44 @@ API_HANDLER_SCH::handleParseAndCreateItemsFromString( const HANDLER_CONTEXT<Pars
     SCH_SCREEN* targetScreen = targetPath->LastScreen();
 
     // Parse into a scratch sheet, as the Paste action does.  The screen is owned by the sheet.
-    STRING_LINE_READER reader( aCtx.Request.contents(), "ParseAndCreateItemsFromString" );
+    std::string contents = aCtx.Request.contents();
+
+    // The clipboard format is the bare item list; a whole sheet as written by
+    // SaveDocumentToString (or "(kicad_sch)" by hand) is unwrapped and its file-level tokens
+    // dropped so that it pastes too
+    {
+        wxString text = wxString::FromUTF8( contents );
+        text.Trim( false ).Trim( true );
+
+        if( text.StartsWith( wxS( "(kicad_sch" ) ) && text.EndsWith( wxS( ")" ) ) )
+        {
+            text = text.Mid( wxString( wxS( "(kicad_sch" ) ).length() );
+            text.RemoveLast();
+
+            // The file-level tokens are single lines in pretty-printed text
+            wxString      filtered;
+            wxArrayString lines = wxSplit( text, '\n', '\0' );
+
+            for( const wxString& line : lines )
+            {
+                wxString trimmed = line;
+                trimmed.Trim( false ).Trim( true );
+
+                if( trimmed.EndsWith( wxS( ")" ) )
+                    && ( trimmed.StartsWith( wxS( "(version " ) ) || trimmed.StartsWith( wxS( "(generator " ) )
+                         || trimmed.StartsWith( wxS( "(generator_version " ) ) || trimmed.StartsWith( wxS( "(paper " ) ) ) )
+                {
+                    continue;
+                }
+
+                filtered += line + wxS( "\n" );
+            }
+
+            contents = filtered.ToUTF8();
+        }
+    }
+
+    STRING_LINE_READER reader( contents, "ParseAndCreateItemsFromString" );
     SCH_IO_KICAD_SEXPR plugin;
     SCH_SHEET          tempSheet;
     SCH_SCREEN*        tempScreen = new SCH_SCREEN( schematic() );
