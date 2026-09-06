@@ -22,6 +22,7 @@
 #define _COLOR_SETTINGS_H
 
 #include <unordered_map>
+#include <vector>
 
 #include <gal/color4d.h>
 #include <settings/json_settings.h>
@@ -74,6 +75,12 @@ public:
 
     const wxString& GetName() const { return m_displayName; }
     void SetName( const wxString& aName ) { m_displayName = aName; }
+
+    /**
+     * Every color the theme defines: the theme file's key ("board.copper.f") and the layer it
+     * colors.  Since 11.0
+     */
+    std::vector<std::pair<std::string, int>> GetColorKeys() const;
 
     bool GetOverrideSchItemColors() const { return m_overrideSchItemColors; }
     void SetOverrideSchItemColors( bool aFlag ) { m_overrideSchItemColors = aFlag; }

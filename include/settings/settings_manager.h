@@ -175,6 +175,12 @@ public:
      *                  RTTI doesn't work across compile boundaries).
      * @return a pointer to a loaded settings object.
      */
+    /**
+     * Find registered settings by file name ("pcbnew", "eeschema", ...), whatever their type.
+     * @return the settings, or nullptr if no such file is registered.  Since 11.0
+     */
+    JSON_SETTINGS* GetSettingsByFilename( const wxString& aFilename ) const;
+
     template<typename T>
     T* GetToolbarSettings( const wxString& aFilename )
     {

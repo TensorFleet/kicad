@@ -28,6 +28,7 @@
 #include <api/api_handler.h>
 #include <api/common/commands/base_commands.pb.h>
 #include <api/common/commands/project_commands.pb.h>
+#include <api/common/commands/settings_commands.pb.h>
 
 using namespace kiapi::common;
 using google::protobuf::Empty;
@@ -45,6 +46,13 @@ public:
             const commands::NewProject& )>;
     using NEW_DOCUMENT_HANDLER = std::function<HANDLER_RESULT<commands::OpenDocumentResponse>(
             const commands::NewDocument& )>;
+    /**
+     * Makes sure an editor's settings are registered (the host loads the editor's kiface if it
+     * has not yet), so that GetAppSettings can read them.  @return false with a message if the
+     * editor is not available.  Since 11.0
+     */
+    using ENSURE_APP_SETTINGS_HANDLER = std::function<bool( commands::AppType, wxString* )>;
+
     using GET_PROJECT_INFO_HANDLER = std::function<HANDLER_RESULT<commands::ProjectInfoResponse>(
             const commands::GetProjectInfo& )>;
 
@@ -76,6 +84,14 @@ public:
     {
         m_getProjectInfoHandler = std::move( aHandler );
     }
+
+    void SetEnsureAppSettingsHandler( ENSURE_APP_SETTINGS_HANDLER aHandler )
+    {
+        m_ensureAppSettingsHandler = std::move( aHandler );
+    }
+
+    /// The settings file name of an editor ("pcbnew", "eeschema", ...), or empty.  Since 11.0
+    static wxString AppSettingsFilename( commands::AppType aApp );
 
 private:
     HANDLER_RESULT<commands::GetVersionResponse> handleGetVersion(
@@ -128,6 +144,16 @@ private:
     HANDLER_RESULT<commands::OpenDocumentResponse> handleNewDocument(
         const HANDLER_CONTEXT<commands::NewDocument>& aCtx );
 
+    // Since 11.0
+    HANDLER_RESULT<commands::ColorThemesResponse> handleListColorThemes(
+        const HANDLER_CONTEXT<commands::ListColorThemes>& aCtx );
+
+    HANDLER_RESULT<commands::ColorThemeResponse> handleGetColorTheme(
+        const HANDLER_CONTEXT<commands::GetColorTheme>& aCtx );
+
+    HANDLER_RESULT<commands::AppSettings> handleGetAppSettings(
+        const HANDLER_CONTEXT<commands::GetAppSettings>& aCtx );
+
     HANDLER_RESULT<commands::ProjectInfoResponse> handleGetProjectInfo(
         const HANDLER_CONTEXT<commands::GetProjectInfo>& aCtx );
 
@@ -141,6 +167,7 @@ private:
     NEW_PROJECT_HANDLER m_newProjectHandler;
     NEW_DOCUMENT_HANDLER m_newDocumentHandler;
     GET_PROJECT_INFO_HANDLER m_getProjectInfoHandler;
+    ENSURE_APP_SETTINGS_HANDLER m_ensureAppSettingsHandler;
 };
 
 #endif //KICAD_API_HANDLER_COMMON_H

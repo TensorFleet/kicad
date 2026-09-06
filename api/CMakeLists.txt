@@ -35,6 +35,7 @@ set( KIAPI_PROTO_SRCS
     common/commands/editor_commands.proto
     common/commands/library_commands.proto
     common/commands/project_commands.proto
+    common/commands/settings_commands.proto
     common/commands/variant_commands.proto
 
     board/board.proto

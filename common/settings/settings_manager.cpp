@@ -265,6 +265,18 @@ void SETTINGS_MANAGER::FlushAndRelease( JSON_SETTINGS* aSettings, bool aSave )
 }
 
 
+JSON_SETTINGS* SETTINGS_MANAGER::GetSettingsByFilename( const wxString& aFilename ) const
+{
+    for( const std::unique_ptr<JSON_SETTINGS>& settings : m_settings )
+    {
+        if( settings->GetFilename() == aFilename )
+            return settings.get();
+    }
+
+    return nullptr;
+}
+
+
 COLOR_SETTINGS* SETTINGS_MANAGER::GetColorSettings( const wxString& aName )
 {
     // Find settings the fast way

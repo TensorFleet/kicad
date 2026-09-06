@@ -1012,3 +1012,17 @@ message GlobalDeletionResponse
 {
   uint32 deleted_count = 1;
 }
+
+
+//// Graphics defaults ////
+
+// Replaces the text and line defaults of the listed layer classes (Board Setup > Text &
+// Graphics Defaults); the classes not listed are left alone.  Only the size, stroke width,
+// italic and keep-upright attributes of the text are used.  Returns GraphicsDefaultsResponse
+// Since 11.0
+message SetGraphicsDefaults
+{
+  kiapi.common.types.DocumentSpecifier board = 1;
+
+  kiapi.board.GraphicsDefaults defaults = 2;
+}

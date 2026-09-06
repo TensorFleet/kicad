@@ -1,0 +1,163 @@
+/*
+ * This program source code file is part of KiCad, a free EDA CAD application.
+ *
+ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation, either version 3 of the License, or (at your
+ * option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+// Read access to the user's KiCad settings that a client needs to render and edit like KiCad
+// does: color themes and the editors' application settings.  Since 11.0
+
+syntax = "proto3";
+
+package kiapi.common.commands;
+
+import "common/types/base_types.proto";
+
+
+//// Color themes ////
+
+// Since 11.0
+message ColorThemeInfo
+{
+  // Display name, as the preferences show it ("KiCad Default")
+  string name = 1;
+
+  // File name without extension in the user's colors folder; the built-in themes have none
+  string filename = 2;
+
+  // Built-in and system themes cannot be edited
+  bool read_only = 3;
+}
+
+// Lists the color themes KiCad knows: the built-in ones, the system and PCM themes, and the
+// user's own.  Returns ColorThemesResponse
+// Since 11.0
+message ListColorThemes
+{
+}
+
+// Since 11.0
+message ColorThemesResponse
+{
+  repeated ColorThemeInfo themes = 1;
+}
+
+// Since 11.0
+message ColorThemeEntry
+{
+  // The theme file's key, "board.copper.f" or "schematic.wire"
+  string key = 1;
+
+  // The KiCad layer id the color applies to (PCB_LAYER_ID, GAL_LAYER_ID or SCH_LAYER_ID)
+  int32 layer = 2;
+
+  kiapi.common.types.Color color = 3;
+}
+
+// Returns every color of one theme.  Returns ColorThemeResponse
+// Since 11.0
+message GetColorTheme
+{
+  // Display name or file name; empty for the built-in default theme
+  string name = 1;
+}
+
+// Since 11.0
+message ColorThemeResponse
+{
+  ColorThemeInfo theme = 1;
+
+  repeated ColorThemeEntry colors = 2;
+
+  // Whether the schematic colors override the colors symbols carry themselves
+  bool override_schematic_item_colors = 3;
+}
+
+
+//// Application settings ////
+
+// Since 11.0
+enum AppType
+{
+  APP_UNKNOWN = 0;
+  APP_PCB_EDITOR = 1;
+  APP_SCHEMATIC_EDITOR = 2;
+  APP_FOOTPRINT_EDITOR = 3;
+  APP_SYMBOL_EDITOR = 4;
+}
+
+// Since 11.0
+enum UnitSystem
+{
+  US_UNKNOWN = 0;
+  US_INCHES = 1;
+  US_MILLIMETRES = 2;
+  US_MILS = 3;
+}
+
+// One entry of an editor's grid list; sizes are the user's strings ("1.0 mm", "50 mil")
+// Since 11.0
+message GridDefinition
+{
+  string name = 1;
+  string x = 2;
+  string y = 3;
+}
+
+// The subset of an editor's settings a client needs to show a document the way the editor
+// would.  Returns AppSettings
+// Since 11.0
+message GetAppSettings
+{
+  AppType app = 1;
+}
+
+// Since 11.0
+message AppSettings
+{
+  AppType app = 1;
+
+  UnitSystem units = 2;
+
+  // The color theme the editor uses (see ListColorThemes)
+  string color_theme = 3;
+
+  repeated GridDefinition grids = 4;
+
+  // Index into grids of the grid in use
+  uint32 current_grid = 5;
+
+  bool grid_visible = 6;
+  bool grid_axes_visible = 7;
+
+  // 0 = dots, 1 = lines, 2 = small crosses
+  uint32 grid_style = 8;
+
+  // 0 = always, 1 = never, 2 = when the grid is shown
+  uint32 grid_snap = 9;
+
+  repeated double zoom_factors = 10;
+
+  uint32 max_undo_items = 11;
+
+  // The editor's item defaults (the schematic editor's "drawing" section: default_wire_thickness,
+  // default_text_size, ... in the file's units) as strings.  Empty for editors whose defaults
+  // live in the document (the board's graphics defaults, see GetGraphicsDefaults).
+  map<string, string> defaults = 12;
+
+  // The settings file these came from
+  string settings_file = 13;
+}

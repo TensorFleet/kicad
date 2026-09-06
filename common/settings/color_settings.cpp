@@ -336,6 +336,20 @@ COLOR_SETTINGS::COLOR_SETTINGS( const wxString& aFilename, bool aAbsolutePath ) 
 }
 
 
+std::vector<std::pair<std::string, int>> COLOR_SETTINGS::GetColorKeys() const
+{
+    std::vector<std::pair<std::string, int>> keys;
+
+    for( PARAM_BASE* param : m_params )
+    {
+        if( COLOR_MAP_PARAM* colorParam = dynamic_cast<COLOR_MAP_PARAM*>( param ) )
+            keys.emplace_back( colorParam->GetJsonPath(), colorParam->GetKey() );
+    }
+
+    return keys;
+}
+
+
 COLOR_SETTINGS::COLOR_SETTINGS( const COLOR_SETTINGS& aOther ) :
         JSON_SETTINGS( aOther.m_filename, SETTINGS_LOC::COLORS, colorsSchemaVersion )
 {

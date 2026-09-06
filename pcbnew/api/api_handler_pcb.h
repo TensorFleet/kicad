@@ -247,6 +247,14 @@ private:
 
     HANDLER_RESULT<GlobalDeletionResponse> handleGlobalDeletion( const HANDLER_CONTEXT<GlobalDeletion>& aCtx );
 
+    HANDLER_RESULT<GraphicsDefaultsResponse>
+    handleGetGraphicsDefaults( const HANDLER_CONTEXT<GetGraphicsDefaults>& aCtx );
+
+    HANDLER_RESULT<GraphicsDefaultsResponse>
+    handleSetGraphicsDefaults( const HANDLER_CONTEXT<SetGraphicsDefaults>& aCtx );
+
+    void packGraphicsDefaults( board::GraphicsDefaults& aOut ) const;
+
     /**
      * Resolve the nets named in a request to net codes.
      * @return an error status if a net is unknown; an empty set if the request named none
