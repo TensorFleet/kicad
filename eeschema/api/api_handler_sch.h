@@ -160,6 +160,26 @@ private:
     HANDLER_RESULT<kiapi::schematic::commands::SchematicNetlistResponse>
     handleGetSchematicNetlist( const HANDLER_CONTEXT<kiapi::schematic::commands::GetSchematicNetlist>& aCtx );
 
+    HANDLER_RESULT<kiapi::schematic::commands::ErcResultsResponse>
+    handleRunSchematicJobErc( const HANDLER_CONTEXT<kiapi::schematic::commands::RunSchematicJobErc>& aCtx );
+
+    HANDLER_RESULT<kiapi::schematic::commands::ErcResultsResponse>
+    handleGetErcMarkers( const HANDLER_CONTEXT<kiapi::schematic::commands::GetErcMarkers>& aCtx );
+
+    HANDLER_RESULT<Empty>
+    handleSetErcMarkerExcluded( const HANDLER_CONTEXT<kiapi::schematic::commands::SetErcMarkerExcluded>& aCtx );
+
+    HANDLER_RESULT<kiapi::schematic::commands::ErcSeveritiesResponse>
+    handleGetErcSeverities( const HANDLER_CONTEXT<kiapi::schematic::commands::GetErcSeverities>& aCtx );
+
+    HANDLER_RESULT<kiapi::schematic::commands::ErcSeveritiesResponse>
+    handleSetErcSeverities( const HANDLER_CONTEXT<kiapi::schematic::commands::SetErcSeverities>& aCtx );
+
+    /// Fill an ErcResultsResponse from the markers currently in the schematic hierarchy
+    void collectErcMarkers( kiapi::schematic::commands::ErcResultsResponse& aResponse ) const;
+
+    kiapi::schematic::commands::ErcSeveritiesResponse ercSeverities() const;
+
     HANDLER_RESULT<commands::CrossProbeAnnounceResponse>
     handleCrossProbeAnnounce( const HANDLER_CONTEXT<commands::CrossProbeAnnounce>& aCtx );
 

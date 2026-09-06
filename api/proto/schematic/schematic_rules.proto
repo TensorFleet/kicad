@@ -103,6 +103,29 @@ message ErcMarker
   ErcErrorType error_type = 1;
   kiapi.common.types.Vector2 position = 2;
 
+  // The id of the SCH_MARKER in the schematic.  Only set for markers read from a schematic
+  // (GetErcMarkers, RunSchematicJobErc); ignored when a marker is sent to KiCad as an exclusion.
+  // Markers are rebuilt (with new ids) every time the checker runs, so ids from before a run are
+  // stale.
+  // Since 11.0
+  kiapi.common.types.KIID id = 8;
+
+  // Effective severity of this marker (after exclusions are applied)
+  // Since 11.0
+  kiapi.common.types.RuleSeverity severity = 9;
+
+  // True if the marker has been excluded by the user
+  // Since 11.0
+  bool excluded = 10;
+
+  // Comment attached to the exclusion, if excluded
+  // Since 11.0
+  string exclusion_comment = 11;
+
+  // Human-readable description of the violation
+  // Since 11.0
+  string description = 12;
+
   // For now will be up to 2 items
   repeated kiapi.common.types.KIID items = 3;
 

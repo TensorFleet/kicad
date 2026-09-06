@@ -23,6 +23,7 @@ package kiapi.schematic.commands;
 
 import "common/types/base_types.proto";
 import "common/types/enums.proto";
+import "schematic/schematic_rules.proto";
 import "schematic/schematic_types.proto";
 
 
@@ -56,4 +57,75 @@ message SchematicNetlistResponse
   kiapi.common.types.DocumentSpecifier document = 1;
 
   repeated kiapi.schematic.types.SchematicNet nets = 2;
+}
+
+
+//// ERC ////
+
+// Runs the electrical rules checker on an open schematic, replacing its ERC markers with the
+// results, exactly as the "kicad-cli sch erc" job does.  The check runs synchronously.
+// Returns ErcResultsResponse
+// Since 11.0
+message RunSchematicJobErc
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+}
+
+// Since 11.0
+message ErcResultsResponse
+{
+  // Every ERC marker in the schematic hierarchy, including excluded ones
+  repeated kiapi.schematic.ErcMarker markers = 1;
+
+  // Counts of markers by effective severity; excluded markers are only counted in exclusion_count
+  uint32 error_count = 2;
+  uint32 warning_count = 3;
+  uint32 exclusion_count = 4;
+}
+
+// Returns the ERC markers currently in the schematic without running the checker.
+// Returns ErcResultsResponse
+// Since 11.0
+message GetErcMarkers
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+}
+
+// Marks the given markers as excluded (or clears the exclusion).  The project's exclusion list
+// is updated so the change persists.
+// Since 11.0
+message SetErcMarkerExcluded
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+
+  repeated kiapi.common.types.KIID markers = 2;
+
+  bool excluded = 3;
+
+  // Comment stored with the exclusion; ignored when clearing
+  string comment = 4;
+}
+
+// Returns ErcSeveritiesResponse: the severity of every ERC rule type for the open schematic
+// Since 11.0
+message GetErcSeverities
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+}
+
+// Since 11.0
+message ErcSeveritiesResponse
+{
+  repeated kiapi.schematic.ErcSeveritySetting severities = 1;
+}
+
+// Sets the severity of the given ERC rule types; rule types not listed keep their current
+// severity.  Only error, warning, and ignore are accepted.
+// Returns ErcSeveritiesResponse with the full resulting set
+// Since 11.0
+message SetErcSeverities
+{
+  kiapi.common.types.DocumentSpecifier schematic = 1;
+
+  repeated kiapi.schematic.ErcSeveritySetting severities = 2;
 }

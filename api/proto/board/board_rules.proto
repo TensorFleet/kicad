@@ -214,6 +214,28 @@ message DrcMarker
 {
   DrcErrorType error_type = 1;
   kiapi.common.types.Vector2 position = 2;
+
+  // The id of the PCB_MARKER on the board.  Only set for markers read from a board (GetDrcMarkers,
+  // RunBoardJobDrc); ignored when a marker is sent to KiCad as part of an exclusion.  Markers are
+  // rebuilt (with new ids) every time the checker runs, so ids from before a run are stale.
+  // Since 11.0
+  kiapi.common.types.KIID id = 5;
+
+  // Effective severity of this marker (after custom rules and exclusions are applied)
+  // Since 11.0
+  kiapi.common.types.RuleSeverity severity = 6;
+
+  // True if the marker has been excluded by the user
+  // Since 11.0
+  bool excluded = 7;
+
+  // Comment attached to the exclusion, if excluded
+  // Since 11.0
+  string exclusion_comment = 8;
+
+  // Human-readable description of the violation
+  // Since 11.0
+  string description = 9;
   // May be up to 4 items involved
   repeated kiapi.common.types.KIID items = 3;
   kiapi.board.types.BoardLayer layer = 4;
