@@ -38,6 +38,7 @@
 #include <api/common/events.pb.h>
 
 class API_HANDLER;
+class API_HANDLER_FALLBACK;
 class API_HANDLER_SERVER;
 class KINNG_PUBLISHER;
 class KINNG_REQUEST_SERVER;
@@ -87,8 +88,8 @@ public:
 
     /**
      * Pass a parsed request through the registered handlers in registration order until one
-     * answers.  This is the dispatch step of request handling, without the transport (token
-     * check, parsing, reply).
+     * answers, then through the fallback handler.  This is the dispatch step of request handling,
+     * without the transport (token check, parsing, reply).
      *
      * @return the first handler's response, or AS_UNHANDLED if no handler claimed the request
      */
@@ -185,6 +186,9 @@ private:
 
     /// Serves commands that concern the server itself (GetSupportedCommands); always registered
     std::unique_ptr<API_HANDLER_SERVER> m_serverHandler;
+
+    /// Answers after every registered handler declined; see API_HANDLER_FALLBACK
+    std::unique_ptr<API_HANDLER_FALLBACK> m_fallbackHandler;
 
     /// Registered handlers in registration order; see RegisterHandler
     std::vector<API_HANDLER*> m_handlers;
