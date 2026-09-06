@@ -46,6 +46,7 @@
 #include <geometry/shape_line_chain.h>
 #include <geometry/shape_segment.h>
 #include <pcb_barcode.h>
+#include <pcb_dimension.h>
 #include <pcb_table.h>
 #include <pcb_tablecell.h>
 #include <pcb_text.h>
@@ -1502,6 +1503,59 @@ BOOST_AUTO_TEST_CASE( KnockoutTextItemCarriesThePolygonsThePlotterFills )
     SHAPE_POLY_SET overlap = fromApi;
     overlap.BooleanIntersection( glyphs );
     BOOST_CHECK_SMALL( overlap.Area(), glyphs.Area() / 100 );
+}
+
+
+BOOST_AUTO_TEST_CASE( DimensionCarriesTheTextThePlotterDraws )
+{
+    BOARD* board = loadBoard( wxS( "api_kitchen_sink" ) );
+
+    std::vector<std::pair<std::string, std::string>> found;
+
+    for( BOARD_ITEM* item : board->Drawings() )
+    {
+        PCB_DIMENSION_BASE* dimension = dynamic_cast<PCB_DIMENSION_BASE*>( item );
+
+        if( !dimension )
+            continue;
+
+        google::protobuf::Any any;
+        dimension->Serialize( any );
+
+        kiapi::board::types::Dimension message;
+        BOOST_REQUIRE( any.UnpackTo( &message ) );
+
+        // The composed string, not the bare measurement the text field carries
+        BOOST_CHECK_EQUAL( message.resolved_text(),
+                           std::string( dimension->GetShownText( true ).ToUTF8() ) );
+
+        found.emplace_back( message.text().text(), message.resolved_text() );
+
+        // Deserializing ignores it: the string follows from the measurement and the format
+        PCB_DIMENSION_BASE* copy = static_cast<PCB_DIMENSION_BASE*>( dimension->Clone() );
+        message.set_resolved_text( "not a dimension" );
+        any.PackFrom( message );
+        BOOST_REQUIRE( copy->Deserialize( any ) );
+        BOOST_CHECK_EQUAL( std::string( copy->GetText().ToUTF8() ),
+                           std::string( dimension->GetText().ToUTF8() ) );
+        delete copy;
+    }
+
+    std::sort( found.begin(), found.end() );
+
+    // The six dimensions on the kitchen sink board, covering all five types.  The bare
+    // measurements alone do not tell a client what to draw: the leader and the centre dimension
+    // both measure zero, but one plots its override text and the other plots nothing at all.
+    std::vector<std::pair<std::string, std::string>> expected = {
+        { "0.0000", "" },                 // centre
+        { "0.0000", "Leader" },           // leader, with override text
+        { "2.1506", "R 2.1506 mm" },      // radial, with a prefix
+        { "246.1", "246.1 mils" },        // orthogonal
+        { "26.5000", "26.5000 mm" },      // aligned
+        { "26.6177", "26.6177 mm" }       // aligned
+    };
+
+    BOOST_CHECK_EQUAL_COLLECTIONS( found.begin(), found.end(), expected.begin(), expected.end() );
 }
 
 
