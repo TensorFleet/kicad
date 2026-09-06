@@ -34,9 +34,11 @@
 
 #include <kicommon.h>
 #include <api/common/commands/base_commands.pb.h>
+#include <api/common/events.pb.h>
 
 class API_HANDLER;
 class API_HANDLER_SERVER;
+class KINNG_PUBLISHER;
 class KINNG_REQUEST_SERVER;
 class wxEvtHandler;
 
@@ -81,6 +83,22 @@ public:
     kiapi::common::commands::GetSupportedCommandsResponse SupportedCommands() const;
 
     /**
+     * @return the response for the GetServerInfo API command: socket URLs and token
+     */
+    kiapi::common::commands::GetServerInfoResponse ServerInfo() const;
+
+    /**
+     * Publish an event on the events (pub/sub) socket.  The event's sequence number is assigned
+     * here.  Safe to call from any thread; does nothing if the events socket is not running.
+     *
+     * @return true if the event was handed to the transport
+     */
+    bool Publish( kiapi::common::events::Event aEvent );
+
+    /// @return the number of events published so far by this server
+    uint64_t PublishedEventCount() const { return m_eventSequence.load( std::memory_order_acquire ); }
+
+    /**
      * Block the calling thread until the server thread has queued a request, or aTimeout has
      * elapsed.  Hosts without a running wxWidgets event loop (kicad-cli api-server) use this to
      * know when wxApp::ProcessPendingEvents() has work to do instead of polling.
@@ -104,6 +122,9 @@ public:
 
     std::string SocketPath() const;
 
+    /// @return the URL of the events socket, or an empty string if events are not published
+    std::string EventsSocketPath() const;
+
     const std::string& Token() const { return m_token; }
 
     /**
@@ -115,6 +136,12 @@ public:
      * Return the default API socket URL (including the ipc:// scheme).
      */
     static std::string StandardSocketUrl();
+
+    /**
+     * Derive the events socket path from a request socket path: "api.sock" becomes
+     * "api-events.sock" (and "api-1234.sock" becomes "api-1234-events.sock").
+     */
+    static wxFileName EventsSocketPathFor( const wxFileName& aSocketPath );
 
 private:
 
@@ -138,6 +165,11 @@ private:
     void log( const std::string& aOutput );
 
     std::unique_ptr<KINNG_REQUEST_SERVER> m_server;
+
+    /// Pushes kiapi.common.events.Event messages to subscribers; see Publish
+    std::unique_ptr<KINNG_PUBLISHER> m_publisher;
+
+    std::atomic<uint64_t> m_eventSequence;
 
     /// Serves commands that concern the server itself (GetSupportedCommands); always registered
     std::unique_ptr<API_HANDLER_SERVER> m_serverHandler;

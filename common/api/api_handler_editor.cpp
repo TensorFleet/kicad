@@ -262,11 +262,114 @@ void API_HANDLER_EDITOR::pushCurrentCommit( const std::string& aClientName,
     if( it == m_commits.end() )
         return;
 
-    it->second.second->Push( aMessage.IsEmpty() ? m_defaultCommitMessage : aMessage );
+    // Take ownership so that the entries can still be read after the map entry is gone; Push()
+    // clears the staged list, so the event is built first.
+    KIID                    id = it->second.first;
+    std::unique_ptr<COMMIT> commit = std::move( it->second.second );
     m_commits.erase( it );
     m_activeClients.erase( aClientName );
 
-    bumpRevision();
+    wxString message = aMessage.IsEmpty() ? m_defaultCommitMessage : aMessage;
+
+    ++m_revision;
+
+    events::Event event;
+    fillDocumentChanged( *event.mutable_document_changed(), aClientName, message, &id, commit.get() );
+
+    commit->Push( message );
+
+    publish( event );
+}
+
+
+void API_HANDLER_EDITOR::NotifyDocumentOpened()
+{
+    if( !Server() )
+        return;
+
+    if( std::optional<DocumentSpecifier> doc = Document() )
+    {
+        events::Event event;
+        *event.mutable_document_opened()->mutable_document() = std::move( *doc );
+        publish( event );
+    }
+}
+
+
+void API_HANDLER_EDITOR::bumpRevision()
+{
+    publishDocumentChanged( "", wxEmptyString );
+}
+
+
+void API_HANDLER_EDITOR::publishDocumentChanged( const std::string& aClientName, const wxString& aMessage,
+                                                 const KIID* aCommitId, const COMMIT* aCommit )
+{
+    ++m_revision;
+
+    if( !Server() )
+        return;
+
+    events::Event event;
+    fillDocumentChanged( *event.mutable_document_changed(), aClientName, aMessage, aCommitId, aCommit );
+    publish( event );
+}
+
+
+void API_HANDLER_EDITOR::fillDocumentChanged( events::DocumentChanged& aEvent, const std::string& aClientName,
+                                              const wxString& aMessage, const KIID* aCommitId,
+                                              const COMMIT* aCommit ) const
+{
+    if( std::optional<DocumentSpecifier> doc = Document() )
+        *aEvent.mutable_document() = std::move( *doc );
+
+    aEvent.set_revision( m_revision );
+    aEvent.set_message( aMessage.ToUTF8() );
+    aEvent.set_client_name( aClientName );
+
+    if( aCommitId )
+        aEvent.mutable_commit_id()->set_value( aCommitId->AsStdString() );
+
+    if( aCommit )
+    {
+        aCommit->ForEachEntry(
+                [&]( EDA_ITEM* aItem, CHANGE_TYPE aType )
+                {
+                    if( !aItem )
+                        return;
+
+                    types::KIID* id = nullptr;
+
+                    switch( aType )
+                    {
+                    case CHT_ADD:    id = aEvent.add_created(); break;
+                    case CHT_MODIFY: id = aEvent.add_updated(); break;
+                    case CHT_REMOVE: id = aEvent.add_deleted(); break;
+                    default:         return;
+                    }
+
+                    id->set_value( aItem->m_Uuid.AsStdString() );
+                } );
+    }
+}
+
+
+void API_HANDLER_EDITOR::notifyDocumentSaved( const wxString& aPath )
+{
+    ++m_revision;
+
+    if( !Server() )
+        return;
+
+    events::Event event;
+    events::DocumentSaved& saved = *event.mutable_document_saved();
+
+    if( std::optional<DocumentSpecifier> doc = Document() )
+        *saved.mutable_document() = std::move( *doc );
+
+    saved.set_path( aPath.ToUTF8() );
+    saved.set_revision( m_revision );
+    publish( event );
 }
 
 

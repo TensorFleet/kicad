@@ -53,6 +53,7 @@
 #include <sch_footprint_field_reconciler.h>
 #include <sch_bus_entry.h>
 #include <sch_commit.h>
+#include <api/api_handler_sch.h>
 #include <sch_edit_frame.h>
 #include <sch_draw_panel.h>
 #include <sch_io/kicad_legacy/sch_io_kicad_legacy.h>
@@ -870,6 +871,9 @@ bool SCH_EDIT_FRAME::OpenProjectFiles( const std::vector<wxString>& aFileSet, in
             } );
 
     m_remoteSymbolPane->BindWebViewLoaded();
+
+    if( m_apiHandler )
+        m_apiHandler->NotifyDocumentOpened();
 
     return true;
 }

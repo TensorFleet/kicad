@@ -43,6 +43,8 @@ public:
     API_HANDLER_PCB( PCB_EDIT_FRAME* aFrame );
     API_HANDLER_PCB( std::shared_ptr<PCB_CONTEXT> aContext, PCB_EDIT_FRAME* aFrame = nullptr );
 
+    std::optional<DocumentSpecifier> Document() const override;
+
 private:
     typedef std::map<std::string, PROPERTY_BASE*> PROTO_PROPERTY_MAP;
 

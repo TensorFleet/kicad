@@ -36,6 +36,7 @@ target_include_directories( qa_kinng PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/qa/mocks/include
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${NNG_INCLUDE_DIR}
     )
 
 kicad_add_boost_test( qa_kinng qa_kinng )

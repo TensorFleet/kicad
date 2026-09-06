@@ -1,0 +1,123 @@
+/*
+ * This program source code file is part of KiCad, a free EDA CAD application.
+ *
+ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation, either version 3 of the License, or (at your
+ * option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
+ * Notifications pushed by KiCad on the events socket.
+ *
+ * Next to the request/reply socket, the API server listens on a publish/subscribe (nng pub0)
+ * socket whose URL is reported by GetServerInfo.  Every message on that socket is one serialized
+ * Event.  Events are fire-and-forget: a subscriber that connects late, or that cannot keep up,
+ * misses events, so clients should treat them as hints and re-read state through the
+ * request/reply socket when they need it.  The sequence number lets a client detect gaps.
+ *
+ * Since 11.0
+ */
+
+syntax = "proto3";
+
+package kiapi.common.events;
+
+import "common/types/base_types.proto";
+
+// The document was changed (through an API commit, an API command that edits the document
+// outside of a commit, or a revert).  The revision matches GetDocumentRevision.
+message DocumentChanged
+{
+  kiapi.common.types.DocumentSpecifier document = 1;
+
+  // The document revision after this change; see GetDocumentRevision
+  uint64 revision = 2;
+
+  // The id of the API commit that made the change, if the change came from a commit
+  kiapi.common.types.KIID commit_id = 3;
+
+  // Commit message, if any
+  string message = 4;
+
+  // Items created, updated, and deleted by the commit.  Empty for changes made outside of a
+  // commit (for example, SetBoardOrigin or a zone refill); clients should then re-read the
+  // document.
+  repeated kiapi.common.types.KIID created = 5;
+  repeated kiapi.common.types.KIID updated = 6;
+  repeated kiapi.common.types.KIID deleted = 7;
+
+  // The client_name of the API client that made the change, if it came from an API request
+  string client_name = 8;
+}
+
+// A document was opened (or a handler for it became available)
+message DocumentOpened
+{
+  kiapi.common.types.DocumentSpecifier document = 1;
+}
+
+// A document was closed; commands addressing it will now fail
+message DocumentClosed
+{
+  kiapi.common.types.DocumentSpecifier document = 1;
+}
+
+// A document was written to disk
+message DocumentSaved
+{
+  kiapi.common.types.DocumentSpecifier document = 1;
+
+  // Absolute path the document was written to
+  string path = 2;
+
+  // The document revision at the time of the save; see GetDocumentRevision
+  uint64 revision = 3;
+}
+
+// Progress of a long-running job (for example, a DRC run or an export)
+message JobProgress
+{
+  // Identifier of the job, opaque to the client
+  string job_id = 1;
+
+  // Human-readable description of the current phase
+  string description = 2;
+
+  // 0 to 100
+  uint32 percent = 3;
+
+  // True when the job has finished (successfully or not)
+  bool finished = 4;
+}
+
+// The API server is stopping; the request/reply and event sockets will go away
+message ServerShutdown
+{
+}
+
+message Event
+{
+  // Monotonically increasing per server instance, starting at 1
+  uint64 sequence = 1;
+
+  oneof kind
+  {
+    DocumentChanged document_changed = 2;
+    DocumentOpened document_opened = 3;
+    DocumentClosed document_closed = 4;
+    DocumentSaved document_saved = 5;
+    JobProgress job_progress = 6;
+    ServerShutdown server_shutdown = 7;
+  }
+}

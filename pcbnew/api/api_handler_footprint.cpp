@@ -193,6 +193,13 @@ HANDLER_RESULT<GetOpenDocumentsResponse> API_HANDLER_FOOTPRINT::handleGetOpenDoc
     }
 
     GetOpenDocumentsResponse response;
+    response.mutable_documents()->Add( *Document() );
+    return response;
+}
+
+
+std::optional<DocumentSpecifier> API_HANDLER_FOOTPRINT::Document() const
+{
     common::types::DocumentSpecifier doc;
 
     LIB_ID fpid = footprintContext()->GetLoadedFPID();
@@ -207,8 +214,7 @@ HANDLER_RESULT<GetOpenDocumentsResponse> API_HANDLER_FOOTPRINT::handleGetOpenDoc
         doc.mutable_project()->set_path( project().GetProjectDirectory().ToStdString() );
     }
 
-    response.mutable_documents()->Add( std::move( doc ) );
-    return response;
+    return doc;
 }
 
 
@@ -228,7 +234,7 @@ HANDLER_RESULT<Empty> API_HANDLER_FOOTPRINT::handleSaveDocument(
         return tl::unexpected( e );
     }
 
-    bumpRevision();
+    notifyDocumentSaved( footprintContext()->GetLoadedFPID().GetUniStringLibId() );
     return Empty();
 }
 
