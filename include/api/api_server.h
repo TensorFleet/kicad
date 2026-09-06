@@ -26,13 +26,14 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
-#include <set>
 #include <string>
+#include <vector>
 
 #include <wx/event.h>
 #include <wx/filename.h>
 
 #include <kicommon.h>
+#include <api/api_handler.h>
 #include <api/common/commands/base_commands.pb.h>
 #include <api/common/events.pb.h>
 
@@ -62,7 +63,9 @@ public:
     /**
      * Adds a new request handler to the server.  Each handler maintains its own list of API
      * messages that it knows how to handle, and the server will pass every incoming message to all
-     * handlers in succession until one of them handles it.
+     * handlers in registration order until one of them handles it (answers anything other than
+     * AS_UNHANDLED).  A handler that serves a command for more than one editor must therefore
+     * answer AS_UNHANDLED for documents it does not own so that the next handler gets a chance.
      *
      * The caller is responsible for the lifetime of the handler and must call DeregisterHandler
      * before the pointer is freed.
@@ -81,6 +84,15 @@ public:
      * @return the response for the GetSupportedCommands API command
      */
     kiapi::common::commands::GetSupportedCommandsResponse SupportedCommands() const;
+
+    /**
+     * Pass a parsed request through the registered handlers in registration order until one
+     * answers.  This is the dispatch step of request handling, without the transport (token
+     * check, parsing, reply).
+     *
+     * @return the first handler's response, or AS_UNHANDLED if no handler claimed the request
+     */
+    API_RESULT Dispatch( kiapi::common::ApiRequest& aRequest );
 
     /**
      * @return the response for the GetServerInfo API command: socket URLs and token
@@ -174,7 +186,8 @@ private:
     /// Serves commands that concern the server itself (GetSupportedCommands); always registered
     std::unique_ptr<API_HANDLER_SERVER> m_serverHandler;
 
-    std::set<API_HANDLER*> m_handlers;
+    /// Registered handlers in registration order; see RegisterHandler
+    std::vector<API_HANDLER*> m_handlers;
 
     std::string m_token;
 

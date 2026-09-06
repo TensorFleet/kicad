@@ -190,11 +190,25 @@ protected:
 
     static std::vector<KICAD_T> parseRequestedItemTypes( const google::protobuf::RepeatedField<int>& aTypes );
 
-    virtual std::optional<TITLE_BLOCK*> getTitleBlock() { return std::nullopt; }
+    /**
+     * @return the title block of the given (already validated) document, or std::nullopt if the
+     *         editor has no title block.  Editors with several title blocks per document (the
+     *         schematic editor has one per sheet) resolve it from aDocument.
+     */
+    virtual std::optional<TITLE_BLOCK*> getTitleBlock( const DocumentSpecifier& aDocument )
+    {
+        return std::nullopt;
+    }
 
-    virtual std::optional<PAGE_INFO> getPageSettings() { return std::nullopt; }
+    virtual std::optional<PAGE_INFO> getPageSettings( const DocumentSpecifier& aDocument )
+    {
+        return std::nullopt;
+    }
 
-    virtual bool setPageSettings( const PAGE_INFO& aPageInfo ) { return false; }
+    virtual bool setPageSettings( const DocumentSpecifier& aDocument, const PAGE_INFO& aPageInfo )
+    {
+        return false;
+    }
 
     virtual wxString getDrawingSheetFileName() { return wxEmptyString; }
 

@@ -82,11 +82,18 @@ protected:
     std::optional<EDA_ITEM*> getItemFromDocument( const DocumentSpecifier& aDocument,
                                                   const KIID& aId ) override;
 
-    std::optional<TITLE_BLOCK*> getTitleBlock() override;
+    std::optional<TITLE_BLOCK*> getTitleBlock( const DocumentSpecifier& aDocument ) override;
 
-    std::optional<PAGE_INFO> getPageSettings() override;
+    std::optional<PAGE_INFO> getPageSettings( const DocumentSpecifier& aDocument ) override;
 
-    bool setPageSettings( const PAGE_INFO& aPageInfo ) override;
+    bool setPageSettings( const DocumentSpecifier& aDocument, const PAGE_INFO& aPageInfo ) override;
+
+    /**
+     * Resolve the sheet a document specifier refers to: its sheet_path if given, otherwise the
+     * sheet shown in the editor, otherwise the root sheet (headless).
+     * @return std::nullopt if the schematic has no sheets yet
+     */
+    std::optional<SCH_SHEET_PATH> resolveSheet( const DocumentSpecifier& aDocument ) const;
 
     wxString getDrawingSheetFileName() override;
 
