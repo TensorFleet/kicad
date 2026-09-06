@@ -295,6 +295,25 @@ protected:
     void fillDocumentChanged( events::DocumentChanged& aEvent, const std::string& aClientName,
                               const wxString& aMessage, const KIID* aCommitId, const COMMIT* aCommit ) const;
 
+    /// The ids a commit created, updated and deleted, as reported to clients.  Since 11.0
+    struct COMMIT_CHANGES
+    {
+        std::vector<KIID> Created;
+        std::vector<KIID> Updated;
+        std::vector<KIID> Deleted;
+    };
+
+    /**
+     * Sort a commit's entries into created, updated and deleted ids.  An id both removed and added
+     * by the commit (an item replaced by a new one) counts as updated.  Since 11.0
+     */
+    static COMMIT_CHANGES classifyCommit( const COMMIT& aCommit );
+
+    /**
+     * Publish a ProjectChanged event for the project this document belongs to.  Since 11.0
+     */
+    void publishProjectChanged( events::ProjectChangeKind aKind, const std::string& aClientName );
+
     /**
      * Override this to create an appropriate COMMIT subclass for the frame in question
      * @return a new COMMIT, bound to the editor frame

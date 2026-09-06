@@ -170,6 +170,7 @@ HANDLER_RESULT<Empty> API_HANDLER_COMMON::handleSetNetClasses(
     }
 
     netSettings->SetNetclasses( netClasses );
+    publishProjectChanged( kiapi::common::events::PCK_NET_CLASSES, aCtx.ClientName );
 
     return Empty();
 }
@@ -431,6 +432,7 @@ HANDLER_RESULT<Empty> API_HANDLER_COMMON::handleSetTextVariables(
         vars[wxString::FromUTF8( key )] = wxString::FromUTF8( value );
 
     Pgm().GetSettingsManager().SaveProject();
+    publishProjectChanged( kiapi::common::events::PCK_TEXT_VARIABLES, aCtx.ClientName );
 
     return Empty();
 }
@@ -624,6 +626,27 @@ HANDLER_RESULT<ColorThemeResponse> API_HANDLER_COMMON::handleGetColorTheme( cons
     }
 
     return response;
+}
+
+
+void API_HANDLER_COMMON::publishProjectChanged( kiapi::common::events::ProjectChangeKind aKind,
+                                                const std::string& aClientName )
+{
+    if( !Server() )
+        return;
+
+    PROJECT& project = Pgm().GetSettingsManager().Prj();
+
+    if( project.IsNullProject() )
+        return;
+
+    kiapi::common::events::Event           event;
+    kiapi::common::events::ProjectChanged& changed = *event.mutable_project_changed();
+    changed.mutable_project()->set_name( project.GetProjectName().ToUTF8() );
+    changed.mutable_project()->set_path( project.GetProjectPath().ToUTF8() );
+    changed.set_kind( aKind );
+    changed.set_client_name( aClientName );
+    publish( event );
 }
 
 

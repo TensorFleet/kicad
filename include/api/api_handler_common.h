@@ -94,6 +94,10 @@ public:
     static wxString AppSettingsFilename( commands::AppType aApp );
 
 private:
+    /// Publish a ProjectChanged event for the open project.  Since 11.0
+    void publishProjectChanged( kiapi::common::events::ProjectChangeKind aKind,
+                                const std::string& aClientName );
+
     HANDLER_RESULT<commands::GetVersionResponse> handleGetVersion(
         const HANDLER_CONTEXT<commands::GetVersion>& aCtx );
 
