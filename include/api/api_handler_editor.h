@@ -22,6 +22,7 @@
 #define KICAD_API_HANDLER_EDITOR_H
 
 #include <api/api_handler.h>
+#include <api/common/commands/cross_probe_commands.pb.h>
 #include <api/common/commands/editor_commands.pb.h>
 #include <base_units.h>
 #include <commit.h>
@@ -94,6 +95,24 @@ protected:
 
     HANDLER_RESULT<types::PageSettings> handleSetPageSettings(
             const HANDLER_CONTEXT<commands::SetPageSettings>& aCtx );
+
+    HANDLER_RESULT<google::protobuf::Empty> handleRefreshEditor(
+            const HANDLER_CONTEXT<commands::RefreshEditor>& aCtx );
+
+    HANDLER_RESULT<commands::FocusOnItemResponse> handleFocusOnItem(
+            const HANDLER_CONTEXT<commands::FocusOnItem>& aCtx );
+
+    /**
+     * Focus the editor window on the item described by aSpec.  Only called when a frame is
+     * attached; the default does nothing and reports CPS_OK.
+     */
+    virtual void focusOnItem( const commands::SelectionSpec& aSpec, commands::FocusOnItemResponse& aResponse )
+    {
+        aResponse.set_status( commands::CrossProbeStatus::CPS_OK );
+    }
+
+    /// @return the editor frame type that serves thisDocumentType()
+    types::FrameType thisFrameType() const;
 
     /**
      * Override this to create an appropriate COMMIT subclass for the frame in question

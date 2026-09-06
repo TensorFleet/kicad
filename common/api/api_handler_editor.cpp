@@ -44,6 +44,74 @@ API_HANDLER_EDITOR::API_HANDLER_EDITOR( EDA_BASE_FRAME* aFrame ) :
             &API_HANDLER_EDITOR::handleGetDocumentModifiedState );
     registerHandler<GetTitleBlockInfo, types::TitleBlockInfo>( &API_HANDLER_EDITOR::handleGetTitleBlockInfo );
     registerHandler<SetTitleBlockInfo, google::protobuf::Empty>( &API_HANDLER_EDITOR::handleSetTitleBlockInfo );
+    registerHandler<RefreshEditor, google::protobuf::Empty>( &API_HANDLER_EDITOR::handleRefreshEditor );
+    registerHandler<FocusOnItem, FocusOnItemResponse>( &API_HANDLER_EDITOR::handleFocusOnItem );
+}
+
+
+types::FrameType API_HANDLER_EDITOR::thisFrameType() const
+{
+    switch( thisDocumentType() )
+    {
+    case types::DOCTYPE_SCHEMATIC:     return types::FT_SCHEMATIC_EDITOR;
+    case types::DOCTYPE_SYMBOL:        return types::FT_SYMBOL_EDITOR;
+    case types::DOCTYPE_PCB:           return types::FT_PCB_EDITOR;
+    case types::DOCTYPE_FOOTPRINT:     return types::FT_FOOTPRINT_EDITOR;
+    case types::DOCTYPE_DRAWING_SHEET: return types::FT_DRAWING_SHEET_EDITOR;
+    default:                           return types::FT_UNKNOWN;
+    }
+}
+
+
+HANDLER_RESULT<google::protobuf::Empty> API_HANDLER_EDITOR::handleRefreshEditor(
+        const HANDLER_CONTEXT<RefreshEditor>& aCtx )
+{
+    // Let the handler for the requested editor answer; an unspecified frame refreshes this one
+    if( aCtx.Request.frame() != types::FT_UNKNOWN && aCtx.Request.frame() != thisFrameType() )
+    {
+        ApiResponseStatus e;
+        // No message needed for AS_UNHANDLED; this is an internal flag for the API server
+        e.set_status( ApiStatusCode::AS_UNHANDLED );
+        return tl::unexpected( e );
+    }
+
+    // Headless: nothing to refresh, but the request is still a success
+    if( m_frame )
+        m_frame->Refresh();
+
+    return google::protobuf::Empty();
+}
+
+
+HANDLER_RESULT<FocusOnItemResponse> API_HANDLER_EDITOR::handleFocusOnItem(
+        const HANDLER_CONTEXT<FocusOnItem>& aCtx )
+{
+    const SelectionSpec& spec = aCtx.Request.focus_item();
+    types::DocumentType  docType = thisDocumentType();
+
+    // Footprint and pad specs address a board; sheet paths address a schematic.  Pass anything
+    // else on to the other registered handlers.
+    bool boardSpec = spec.has_footprint() || spec.has_pad();
+    bool boardDoc = docType == types::DOCTYPE_PCB || docType == types::DOCTYPE_FOOTPRINT;
+
+    if( ( boardSpec && !boardDoc ) || ( spec.has_sheet_path() && docType != types::DOCTYPE_SCHEMATIC ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_UNHANDLED );
+        return tl::unexpected( e );
+    }
+
+    FocusOnItemResponse response;
+
+    if( !m_frame )
+    {
+        // Headless: there is no view to focus, but the request is still a success
+        response.set_status( CrossProbeStatus::CPS_OK );
+        return response;
+    }
+
+    focusOnItem( spec, response );
+    return response;
 }
 
 

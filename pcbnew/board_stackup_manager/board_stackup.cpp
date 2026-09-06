@@ -20,6 +20,9 @@
 
 
 #include "board_stackup.h"
+#include <algorithm>
+#include <memory>
+#include <vector>
 #include <base_units.h>
 #include <string_utils.h>
 #include <layer_ids.h>
@@ -586,10 +589,166 @@ bool BOARD_STACKUP::Deserialize( const google::protobuf::Any& aContainer )
 }
 
 
+/**
+ * @return true if aLayer is a board layer that a stackup item of type aType may describe
+ */
+static bool layerMatchesStackupType( PCB_LAYER_ID aLayer, BOARD_STACKUP_ITEM_TYPE aType )
+{
+    switch( aType )
+    {
+    case BS_ITEM_TYPE_COPPER:      return IsCopperLayer( aLayer );
+    case BS_ITEM_TYPE_SILKSCREEN:  return aLayer == F_SilkS || aLayer == B_SilkS;
+    case BS_ITEM_TYPE_SOLDERMASK:  return aLayer == F_Mask || aLayer == B_Mask;
+    case BS_ITEM_TYPE_SOLDERPASTE: return aLayer == F_Paste || aLayer == B_Paste;
+    default:                       return false;
+    }
+}
+
+
 bool BOARD_STACKUP::Deserialize( const kiapi::board::BoardStackup& aInput )
 {
-    // Read-only for now
-    return false;
+    using namespace kiapi::board;
+
+    // Build the new list first so that a malformed message leaves this stackup untouched
+    std::vector<std::unique_ptr<BOARD_STACKUP_ITEM>> items;
+    int copperLayersSeen = 0;
+
+    for( const BoardStackupLayer& layer : aInput.layers() )
+    {
+        if( layer.type() == BoardStackupLayerType::BSLT_UNKNOWN
+            || layer.type() == BoardStackupLayerType::BSLT_UNDEFINED )
+        {
+            return false;
+        }
+
+        BOARD_STACKUP_ITEM_TYPE type = FromProtoEnum<BOARD_STACKUP_ITEM_TYPE>( layer.type() );
+        auto item = std::make_unique<BOARD_STACKUP_ITEM>( type );
+
+        item->SetEnabled( layer.enabled() );
+
+        if( type == BS_ITEM_TYPE_DIELECTRIC )
+        {
+            // Dielectric slots are numbered by the copper layer above them, as in
+            // BuildDefaultStackupList
+            item->SetDielectricLayerId( std::max( 1, copperLayersSeen ) );
+        }
+        else
+        {
+            PCB_LAYER_ID brdLayer = FromProtoEnum<PCB_LAYER_ID>( layer.layer() );
+
+            if( !layerMatchesStackupType( brdLayer, type ) )
+                return false;
+
+            item->SetBrdLayerId( brdLayer );
+
+            if( type == BS_ITEM_TYPE_COPPER )
+                copperLayersSeen++;
+        }
+
+        if( layer.has_thickness() && item->IsThicknessEditable() )
+            item->SetThickness( layer.thickness().value_nm() );
+
+        if( layer.has_color() && item->IsColorEditable() )
+            item->SetColor( kiapi::common::UnpackColor( layer.color() ).ToHexString() );
+
+        switch( type )
+        {
+        case BS_ITEM_TYPE_DIELECTRIC:
+        {
+            const BoardStackupDielectricLayer& dielectric = layer.dielectric();
+
+            if( dielectric.type() == BoardStackupDielectricType::BSDT_PREPREG )
+                item->SetTypeName( KEY_PREPREG );
+            else
+                item->SetTypeName( KEY_CORE );
+
+            for( int i = 0; i < dielectric.layer_size(); ++i )
+            {
+                const BoardStackupDielectricProperties& props = dielectric.layer( i );
+
+                // The item is created with one set of parameters; further sub-layers are added
+                if( i > 0 )
+                    item->AddDielectricPrms( i );
+
+                item->SetEpsilonR( props.epsilon_r(), i );
+                item->SetLossTangent( props.loss_tangent(), i );
+
+                if( !props.material_name().empty() )
+                    item->SetMaterial( wxString::FromUTF8( props.material_name() ), i );
+
+                if( props.has_thickness() )
+                    item->SetThickness( props.thickness().value_nm(), i );
+
+                item->SetThicknessLocked( props.thickness_locked(), i );
+
+                if( props.has_spec_frequency() )
+                    item->SetSpecFreq( props.spec_frequency(), i );
+
+                if( props.dielectric_model() != DielectricModel::DM_UNKNOWN )
+                    item->SetDielectricModel( FromProtoEnum<DIELECTRIC_MODEL>( props.dielectric_model() ), i );
+            }
+
+            break;
+        }
+
+        case BS_ITEM_TYPE_SOLDERMASK:
+        {
+            if( !layer.has_soldermask() )
+                break;
+
+            const BoardStackupSoldermaskLayer& soldermask = layer.soldermask();
+
+            item->SetEpsilonR( soldermask.epsilon_r() );
+            item->SetLossTangent( soldermask.loss_tangent() );
+
+            if( !soldermask.material_name().empty() )
+                item->SetMaterial( wxString::FromUTF8( soldermask.material_name() ) );
+
+            if( soldermask.has_thickness() )
+                item->SetThickness( soldermask.thickness().value_nm() );
+
+            break;
+        }
+
+        case BS_ITEM_TYPE_SILKSCREEN:
+        {
+            if( layer.has_silkscreen() && !layer.silkscreen().material_name().empty() )
+                item->SetMaterial( wxString::FromUTF8( layer.silkscreen().material_name() ) );
+
+            break;
+        }
+
+        default:
+            break;
+        }
+
+        items.push_back( std::move( item ) );
+    }
+
+    // Board-level settings that are absent from the message keep their current values
+    if( aInput.has_finish() )
+        m_FinishType = wxString::FromUTF8( aInput.finish().type_name() );
+
+    if( aInput.has_impedance() )
+        m_HasDielectricConstrains = aInput.impedance().is_controlled();
+
+    if( aInput.has_edge() )
+    {
+        const BoardEdgeSettings& edge = aInput.edge();
+
+        if( edge.has_connector() && edge.connector().type() != BoardEdgeConnectorType::BECT_UNKNOWN )
+            m_EdgeConnectorConstraints = FromProtoEnum<BS_EDGE_CONNECTOR_CONSTRAINTS>( edge.connector().type() );
+
+        if( edge.has_plating() )
+            m_EdgePlating = edge.plating().has_edge_plating();
+    }
+
+    RemoveAll();
+
+    for( std::unique_ptr<BOARD_STACKUP_ITEM>& item : items )
+        Add( item.release() );
+
+    return true;
 }
 
 

@@ -29,7 +29,8 @@ import "google/protobuf/any.proto";
 import "common/types/base_types.proto";
 import "common/types/enums.proto";
 
-// Refreshes the given frame, if that frame is open
+// Refreshes the given frame, if that frame is open.  Returns google.protobuf.Empty.
+// In headless mode (no editor window) this succeeds without doing anything.
 message RefreshEditor
 {
   kiapi.common.types.FrameType frame = 1;
@@ -471,6 +472,19 @@ message SavedSelectionResponse
   repeated kiapi.common.types.KIID ids = 1;
 
   string contents = 2;
+}
+
+// Serializes the given items in the same clipboard format as SaveSelectionToString, without
+// requiring an interactive selection (so it is also available in headless mode).
+// Returns SavedSelectionResponse; ids lists the items that were written.
+// Since 11.0
+message SaveItemsToString
+{
+  // Specifies which document contains the items
+  kiapi.common.types.ItemHeader header = 1;
+
+  // The items to serialize.  All items must exist in the document or the request fails.
+  repeated kiapi.common.types.KIID items = 2;
 }
 
 // Attempts to parse the given string as a s-expression formatted container with items,
