@@ -45,6 +45,7 @@
 #include <api/common/commands/variant_commands.pb.h>
 
 #include <board.h>
+#include <footprint.h>
 #include <pcb_track.h>
 #include <settings/settings_manager.h>
 #include <wx/filename.h>

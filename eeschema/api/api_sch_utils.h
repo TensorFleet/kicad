@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <tl/expected.hpp>
 #include <core/typeinfo.h>
+#include <kiid.h>
 #include <api/common/envelope.pb.h>
 #include <api/schematic/schematic_types.pb.h>
 #include <pin_map.h>
