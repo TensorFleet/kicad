@@ -206,14 +206,18 @@ HANDLER_RESULT<UndoRedoResponse> API_HANDLER_EDITOR::undoRedo( const DocumentSpe
     if( !documentValidation )
         return tl::unexpected( documentValidation.error() );
 
-    // Staged changes hold pointers into the document that an undo would pull from under them
+    // A client that called BeginCommit is mid-edit even if it has staged nothing yet, and staged
+    // changes hold pointers into the document that an undo would pull from under them
     for( const auto& [client, commit] : m_commits )
     {
-        if( commit.second && !commit.second->Empty() )
+        bool open = m_activeClients.count( client ) > 0;
+        bool staged = commit.second && !commit.second->Empty();
+
+        if( open || staged )
         {
             ApiResponseStatus e;
             e.set_status( ApiStatusCode::AS_BUSY );
-            e.set_error_message( fmt::format( "cannot {} while client '{}' has uncommitted changes",
+            e.set_error_message( fmt::format( "cannot {} while client '{}' has an open commit",
                                               aRedo ? "redo" : "undo", client ) );
             return tl::unexpected( e );
         }
