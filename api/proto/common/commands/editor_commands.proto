@@ -606,3 +606,69 @@ message ParseAndCreateItemsFromString
 
   string contents = 2;
 }
+
+
+//// Undo and redo ////
+
+// Undoes the most recent commands of the document (API commits, actions, and in the editor the
+// user's own edits).  Refused while a client has an open commit.  Returns UndoRedoResponse
+// Since 11.0
+message Undo
+{
+  kiapi.common.types.DocumentSpecifier document = 1;
+
+  // Number of commands to undo; 0 means 1
+  uint32 count = 2;
+}
+
+// Redoes commands undone by Undo.  Returns UndoRedoResponse
+// Since 11.0
+message Redo
+{
+  kiapi.common.types.DocumentSpecifier document = 1;
+
+  uint32 count = 2;
+}
+
+// Since 11.0
+message UndoRedoResponse
+{
+  // Commands actually undone or redone (fewer than asked when the stack ran out)
+  uint32 applied = 1;
+
+  uint32 undo_count = 2;
+
+  uint32 redo_count = 3;
+}
+
+// Since 11.0
+message UndoStackEntry
+{
+  string description = 1;
+
+  // The API client that made the change, if it came through the API
+  string client_name = 2;
+
+  // The API commit id, if the change came from an API commit
+  kiapi.common.types.KIID commit_id = 3;
+
+  // Items recorded by the command
+  uint32 item_count = 4;
+}
+
+// Lists the undo and redo stacks of a document.  Returns UndoStackResponse
+// Since 11.0
+message GetUndoStack
+{
+  kiapi.common.types.DocumentSpecifier document = 1;
+}
+
+// Since 11.0
+message UndoStackResponse
+{
+  // Oldest first; the last entry is what Undo would undo next
+  repeated UndoStackEntry undo = 1;
+
+  // Oldest first; the last entry is what Redo would redo next
+  repeated UndoStackEntry redo = 2;
+}

@@ -42,6 +42,7 @@ using kiapi::common::types::DocumentSpecifier;
 using kiapi::common::types::ItemRequestStatus;
 using kiapi::common::commands::ItemDeletionStatus;
 
+class API_UNDO_STACK;
 class EDA_BASE_FRAME;
 class TITLE_BLOCK;
 class TOOL_MANAGER;
@@ -115,6 +116,30 @@ protected:
 
     HANDLER_RESULT<commands::GetItemCountsResponse> handleGetItemCounts(
             const HANDLER_CONTEXT<commands::GetItemCounts>& aCtx );
+
+    // Since 11.0
+    HANDLER_RESULT<commands::UndoRedoResponse> handleUndo( const HANDLER_CONTEXT<commands::Undo>& aCtx );
+
+    HANDLER_RESULT<commands::UndoRedoResponse> handleRedo( const HANDLER_CONTEXT<commands::Redo>& aCtx );
+
+    HANDLER_RESULT<commands::UndoStackResponse> handleGetUndoStack(
+            const HANDLER_CONTEXT<commands::GetUndoStack>& aCtx );
+
+    /**
+     * @return the undo stack of a headless document, or nullptr when the document is shown in an
+     *         editor window (whose own undo history is used then)
+     */
+    virtual API_UNDO_STACK* apiUndoStack() const { return nullptr; }
+
+    /**
+     * Undo or redo one command in the editor window through its undo/redo actions.
+     * @return false if there was nothing to undo or redo, or no window
+     */
+    bool undoRedoInFrame( bool aRedo );
+
+    HANDLER_RESULT<commands::UndoRedoResponse> undoRedo( const DocumentSpecifier& aDocument,
+                                                         const std::string& aClientName, bool aRedo,
+                                                         uint32_t aCount );
 
     /**
      * @return the number of items of each type in the (validated) document, as GetItems would
@@ -262,6 +287,14 @@ protected:
     void publishDocumentChanged( const std::string& aClientName, const wxString& aMessage,
                                  const KIID* aCommitId = nullptr, const COMMIT* aCommit = nullptr );
 
+    /**
+     * Advance the revision and publish a DocumentChanged event for a change described by item ids
+     * rather than a commit (an undo or redo step).  Since 11.0
+     */
+    void publishDocumentChanged( const std::string& aClientName, const wxString& aMessage,
+                                 const std::vector<KIID>& aCreated, const std::vector<KIID>& aUpdated,
+                                 const std::vector<KIID>& aDeleted );
+
     void fillDocumentChanged( events::DocumentChanged& aEvent, const std::string& aClientName,
                               const wxString& aMessage, const KIID* aCommitId, const COMMIT* aCommit ) const;
 
@@ -345,6 +378,8 @@ protected:
 private:
     /// Advance m_revision and log what changed; every revision step goes through here
     void advanceRevision( bool aComplete, const COMMIT* aCommit );
+
+    void advanceRevision( REVISION_CHANGES aChanges );
 
     /// The most recent revision steps, oldest first; see changesSince
     std::deque<REVISION_CHANGES> m_revisionChanges;

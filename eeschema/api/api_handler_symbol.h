@@ -23,6 +23,7 @@
 #include <memory>
 
 #include <api/api_handler_editor.h>
+#include <api/api_undo_stack.h>
 #include <api/symbol_context.h>
 #include <api/common/commands/project_commands.pb.h>
 
@@ -85,10 +86,18 @@ private:
 
     LIB_SYMBOL* symbol() const { return m_context->GetSymbol(); }
 
+    API_UNDO_STACK* apiUndoStack() const override { return m_undoStack.get(); }
+
+    /// Put the symbol back into the state an undo list records; see API_UNDO_STACK::RESTORE_FN
+    void restoreUndoList( PICKED_ITEMS_LIST& aList );
+
     /// @return the child of the symbol with the given id, or nullptr
     SCH_ITEM* findItem( const KIID& aId ) const;
 
     std::shared_ptr<SYMBOL_CONTEXT> m_context;
+
+    /// The document's undo history (headless only; symbol documents have no editor window here)
+    std::unique_ptr<API_UNDO_STACK> m_undoStack;
 };
 
 #endif // KICAD_API_HANDLER_SYMBOL_H

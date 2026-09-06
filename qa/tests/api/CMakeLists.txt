@@ -27,6 +27,7 @@ set( QA_API_SRCS
     test_api_libraries.cpp
     test_api_schematic_ops.cpp
     test_api_board_ops.cpp
+    test_api_undo.cpp
     test_api_run_action.cpp
     test_api_wizards.cpp
     )

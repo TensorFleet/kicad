@@ -27,7 +27,9 @@
 #include <project.h>
 #include <sch_field.h>
 #include <sch_item.h>
+#include <sch_commit.h>
 #include <sch_pin.h>
+#include <undo_redo_container.h>
 #include <wx/log.h>
 
 using namespace kiapi::common::commands;
@@ -41,13 +43,15 @@ namespace
 
 /**
  * A commit against a LIB_SYMBOL that has no editor frame: additions and removals are applied on
- * Push(), and Revert() puts the symbol back the way it was.  No undo history is kept.
+ * Push(), and Revert() puts the symbol back the way it was.  Push hands the undo list to the
+ * handler's undo stack, as the editor commits hand theirs to the frame.
  */
 class SYMBOL_API_COMMIT : public COMMIT
 {
 public:
-    SYMBOL_API_COMMIT( LIB_SYMBOL* aSymbol ) :
-            m_symbol( aSymbol )
+    SYMBOL_API_COMMIT( LIB_SYMBOL* aSymbol, UNDO_REDO_SINK* aSink ) :
+            m_symbol( aSymbol ),
+            m_sink( aSink )
     {
     }
 
@@ -60,9 +64,18 @@ public:
 
     void Push( const wxString& aMessage = wxT( "A commit" ), int aFlags = 0 ) override
     {
+        // The undo list is built the way the editor commits build theirs: added items as
+        // NEWITEM, removed items as DELETED (the list keeps the image, since the symbol frees
+        // the original), and modified items as CHANGED with the image as link
+        PICKED_ITEMS_LIST undoList;
+        undoList.SetDescription( aMessage );
+
+        const bool keepHistory = m_sink && !( aFlags & SKIP_UNDO );
+
         for( COMMIT_LINE& ent : m_entries )
         {
             SCH_ITEM* item = static_cast<SCH_ITEM*>( ent.m_item );
+            SCH_ITEM* copy = static_cast<SCH_ITEM*>( ent.m_copy );
 
             switch( ent.m_type & CHT_TYPE )
             {
@@ -70,17 +83,39 @@ public:
                 if( !( ent.m_type & CHT_DONE ) )
                     m_symbol->AddDrawItem( item );
 
+                if( keepHistory )
+                    undoList.PushItem( ITEM_PICKER( nullptr, item, UNDO_REDO::NEWITEM ) );
+
                 break;
 
             case CHT_REMOVE:
                 if( !( ent.m_type & CHT_DONE ) )
                     m_symbol->RemoveDrawItem( item ); // frees the item
 
-                delete ent.m_copy;
+                if( keepHistory && copy )
+                {
+                    copy->SetFlags( UR_TRANSIENT );
+                    undoList.PushItem( ITEM_PICKER( nullptr, copy, UNDO_REDO::DELETED ) );
+                }
+                else
+                {
+                    delete copy;
+                }
+
                 break;
 
             case CHT_MODIFY:
-                delete ent.m_copy;
+                if( keepHistory && copy )
+                {
+                    ITEM_PICKER picker( nullptr, item, UNDO_REDO::CHANGED );
+                    picker.SetLink( copy );
+                    undoList.PushItem( picker );
+                }
+                else
+                {
+                    delete copy;
+                }
+
                 break;
 
             default:
@@ -89,6 +124,9 @@ public:
         }
 
         clear();
+
+        if( undoList.GetCount() > 0 )
+            m_sink->SaveCopyInUndoList( undoList, false );
     }
 
     void Revert() override
@@ -138,7 +176,8 @@ protected:
     EDA_ITEM* makeImage( EDA_ITEM* aItem ) const override { return aItem->Clone(); }
 
 private:
-    LIB_SYMBOL* m_symbol;
+    LIB_SYMBOL*     m_symbol;
+    UNDO_REDO_SINK* m_sink;
 };
 
 
@@ -157,6 +196,81 @@ API_HANDLER_SYMBOL::API_HANDLER_SYMBOL( std::shared_ptr<SYMBOL_CONTEXT> aContext
     registerHandler<SaveCopyOfDocument, Empty>( &API_HANDLER_SYMBOL::handleSaveCopyOfDocument );
     registerHandler<GetItems, GetItemsResponse>( &API_HANDLER_SYMBOL::handleGetItems );
     registerHandler<GetItemsById, GetItemsResponse>( &API_HANDLER_SYMBOL::handleGetItemsById );
+
+    m_undoStack = std::make_unique<API_UNDO_STACK>(
+            [this]( PICKED_ITEMS_LIST& aList )
+            {
+                restoreUndoList( aList );
+            },
+            []( PICKED_ITEMS_LIST& aList )
+            {
+                aList.ClearListAndDeleteItems(
+                        []( EDA_ITEM* aItem )
+                        {
+                            delete aItem;
+                        } );
+            } );
+}
+
+
+void API_HANDLER_SYMBOL::restoreUndoList( PICKED_ITEMS_LIST& aList )
+{
+    LIB_SYMBOL* sym = symbol();
+
+    // Reverse order, so that an item changed and then deleted by one command comes back right
+    for( int ii = (int) aList.GetCount() - 1; ii >= 0; ii-- )
+    {
+        ITEM_PICKER& wrapper = aList.GetItemWrapper( ii );
+        EDA_ITEM*    picked = wrapper.GetItem();
+
+        if( !picked )
+            continue;
+
+        switch( wrapper.GetStatus() )
+        {
+        case UNDO_REDO::CHANGED:
+        {
+            // Pointers go stale when an item is re-created by an undo; resolve by id
+            SCH_ITEM* live = picked->m_Uuid == sym->m_Uuid ? sym : findItem( picked->m_Uuid );
+            SCH_ITEM* image = static_cast<SCH_ITEM*>( wrapper.GetLink() );
+
+            if( !live || !image )
+                break;
+
+            live->SwapItemData( image );
+            wrapper.SetItem( live );
+            break;
+        }
+
+        case UNDO_REDO::NEWITEM:
+        {
+            SCH_ITEM* live = findItem( picked->m_Uuid );
+
+            if( !live )
+                break;
+
+            // The symbol frees what it removes, so the list keeps a copy for the redo
+            SCH_ITEM* kept = static_cast<SCH_ITEM*>( live->Clone() );
+            kept->SetFlags( UR_TRANSIENT );
+            sym->RemoveDrawItem( live );
+            wrapper.SetItem( kept );
+            wrapper.SetStatus( UNDO_REDO::DELETED );
+            break;
+        }
+
+        case UNDO_REDO::DELETED:
+        {
+            SCH_ITEM* item = static_cast<SCH_ITEM*>( picked );
+            item->ClearFlags( UR_TRANSIENT );
+            sym->AddDrawItem( item );
+            wrapper.SetStatus( UNDO_REDO::NEWITEM );
+            break;
+        }
+
+        default:
+            break;
+        }
+    }
 }
 
 
@@ -178,7 +292,7 @@ std::optional<DocumentSpecifier> API_HANDLER_SYMBOL::Document() const
 
 std::unique_ptr<COMMIT> API_HANDLER_SYMBOL::createCommit()
 {
-    return std::make_unique<SYMBOL_API_COMMIT>( symbol() );
+    return std::make_unique<SYMBOL_API_COMMIT>( symbol(), m_undoStack.get() );
 }
 
 

@@ -110,6 +110,8 @@ protected:
 
     TOOL_MANAGER* editorToolManager() const override { return toolManager(); }
 
+    API_UNDO_STACK* apiUndoStack() const override { return context()->GetUndoStack(); }
+
     // No schematic tool runs without a frame yet, so headlessActions() stays empty
     std::vector<std::string> actionPrefixes() const override { return { "eeschema.", "common." }; }
 

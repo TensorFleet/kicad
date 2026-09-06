@@ -100,6 +100,9 @@
 #include <pcb_generator.h>
 #include <generators/pcb_tuning_pattern.h>
 #include <ratsnest/ratsnest_data.h>
+#include <api/api_undo_stack.h>
+#include <origin_viewitem.h>
+#include <undo_redo_container.h>
 #include <teardrop/teardrop.h>
 #include <teardrop/teardrop_parameters.h>
 #include <google/protobuf/util/json_util.h>
@@ -1505,6 +1508,8 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleSetBoardOrigin(
         }
         else
         {
+            recordOriginUndo( aCtx.ClientName, UNDO_REDO::GRIDORIGIN, board()->GetDesignSettings().GetGridOrigin(),
+                              origin );
             board()->GetDesignSettings().SetGridOrigin( origin );
         }
 
@@ -1527,6 +1532,8 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleSetBoardOrigin(
         }
         else
         {
+            recordOriginUndo( aCtx.ClientName, UNDO_REDO::DRILLORIGIN, board()->GetDesignSettings().GetAuxOrigin(),
+                              origin );
             board()->GetDesignSettings().SetAuxOrigin( origin );
         }
 
@@ -3759,6 +3766,34 @@ API_HANDLER_PCB::handleGetCurrentVariant( const HANDLER_CONTEXT<GetCurrentVarian
         response.set_name( current.ToUTF8() );
 
     return response;
+}
+
+
+void API_HANDLER_PCB::recordOriginUndo( const std::string& aClientName, UNDO_REDO aType, const VECTOR2I& aFrom,
+                                        const VECTOR2I& aTo )
+{
+    API_UNDO_STACK* stack = apiUndoStack();
+
+    if( !stack || aFrom == aTo )
+        return;
+
+    // The same marker/image pair the origin tools record: the picked item holds the new origin,
+    // its link the old one, and an undo swaps them
+    KIGFX::ORIGIN_VIEWITEM* marker = new KIGFX::ORIGIN_VIEWITEM( VECTOR2D( aTo ), 0 );
+    KIGFX::ORIGIN_VIEWITEM* image = new KIGFX::ORIGIN_VIEWITEM( VECTOR2D( aFrom ), 0 );
+
+    marker->SetFlags( UR_TRANSIENT );
+    image->SetFlags( UR_TRANSIENT );
+
+    ITEM_PICKER picker( nullptr, marker, aType );
+    picker.SetLink( image );
+
+    PICKED_ITEMS_LIST list;
+    list.SetDescription( aType == UNDO_REDO::DRILLORIGIN ? _( "Set Drill Origin" ) : _( "Set Grid Origin" ) );
+    list.PushItem( picker );
+
+    stack->SetNextAttribution( aClientName, std::nullopt );
+    stack->SaveCopyInUndoList( list, false );
 }
 
 

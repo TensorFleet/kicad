@@ -24,6 +24,7 @@
 
 #include <lib_id.h>
 
+#include <api/api_undo_stack.h>
 #include <api/footprint_context.h>
 
 class APP_SETTINGS_BASE;
@@ -60,12 +61,17 @@ public:
 
     bool OpenFootprint( const LIB_ID& aFPID ) override;
 
+    API_UNDO_STACK* GetUndoStack() const override { return m_undoStack.get(); }
+
 private:
     std::unique_ptr<BOARD> m_board;
     LIB_ID                 m_fpid;
     PROJECT*               m_project;
     KIWAY*                 m_kiway;
     std::unique_ptr<TOOL_MANAGER> m_toolManager;
+
+    /// Declared after the board and tool manager: cleared explicitly before they go
+    std::unique_ptr<API_UNDO_STACK> m_undoStack;
 };
 
 #endif

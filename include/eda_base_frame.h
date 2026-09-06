@@ -607,6 +607,12 @@ public:
     virtual int GetUndoCommandCount() const { return m_undoList.m_CommandsList.size(); }
     virtual int GetRedoCommandCount() const { return m_redoList.m_CommandsList.size(); }
 
+    /// Read access to the undo commands, oldest first.  Since 11.0
+    const UNDO_REDO_CONTAINER& GetUndoList() const { return m_undoList; }
+
+    /// Read access to the redo commands, oldest first.  Since 11.0
+    const UNDO_REDO_CONTAINER& GetRedoList() const { return m_redoList; }
+
     virtual wxString GetUndoActionDescription() const;
     virtual wxString GetRedoActionDescription() const;
 

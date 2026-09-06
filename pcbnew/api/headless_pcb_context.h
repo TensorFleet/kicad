@@ -25,6 +25,7 @@
 
 #include <wx/string.h>
 
+#include <api/api_undo_stack.h>
 #include <api/pcb_context.h>
 
 class APP_SETTINGS_BASE;
@@ -68,6 +69,8 @@ public:
 
     void OnNetlistChanged( BOARD_NETLIST_UPDATER& aUpdater ) override;
 
+    API_UNDO_STACK* GetUndoStack() const override { return m_undoStack.get(); }
+
 private:
     std::unique_ptr<BOARD> m_board;
     PROJECT* m_project;
@@ -77,6 +80,9 @@ private:
     // Board currently doesn't track its own modification state the way SCH_SCREEN does
     // This could be cleaned up in the future
     bool m_contentModified = false;
+
+    /// Declared after the board and tool manager: cleared explicitly before they go
+    std::unique_ptr<API_UNDO_STACK> m_undoStack;
 };
 
 #endif

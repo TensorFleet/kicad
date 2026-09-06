@@ -466,8 +466,13 @@ void SCH_COMMIT::pushSchEdit( const wxString& aMessage, int aCommitFlags )
             screen->SetContentModified();
     }
 
-    if( !( aCommitFlags & SKIP_UNDO ) && frame && undoList.GetCount() > 0 )
-        frame->SaveCopyInUndoList( undoList, UNDO_REDO::UNSPECIFIED, false );
+    if( !( aCommitFlags & SKIP_UNDO ) && undoList.GetCount() > 0 )
+    {
+        if( frame )
+            frame->SaveCopyInUndoList( undoList, UNDO_REDO::UNSPECIFIED, false );
+        else if( UNDO_REDO_SINK* sink = m_toolMgr->GetUndoRedoSink() )
+            sink->SaveCopyInUndoList( undoList, false );   // a headless API session keeps the history
+    }
 
     if( dirtyConnectivity )
     {

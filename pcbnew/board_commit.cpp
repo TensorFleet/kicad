@@ -719,6 +719,12 @@ void BOARD_COMMIT::Push( const wxString& aMessage, int aCommitFlags )
                 frame->SaveCopyInUndoList( undoList, UNDO_REDO::UNSPECIFIED );
         }
     }
+    else if( UNDO_REDO_SINK* sink = m_toolMgr->GetUndoRedoSink() )
+    {
+        // No frame: a headless API session keeps the history
+        if( !( aCommitFlags & SKIP_UNDO ) && undoList.GetCount() > 0 )
+            sink->SaveCopyInUndoList( undoList, aCommitFlags & APPEND_UNDO );
+    }
 
     m_toolMgr->PostEvent( { TC_MESSAGE, TA_MODEL_CHANGE, AS_GLOBAL } );
 
