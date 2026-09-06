@@ -699,6 +699,22 @@ COMMIT* API_HANDLER_EDITOR::getCurrentCommit( const std::string& aClientName )
 }
 
 
+void API_HANDLER_EDITOR::pushImplicitCommit( const std::string& aClientName, const wxString& aMessage )
+{
+    auto it = m_commits.find( aClientName );
+
+    if( it != m_commits.end() && it->second.second && it->second.second->Empty() )
+    {
+        // Nothing was staged, so there is nothing to undo and nothing to tell anyone about
+        m_commits.erase( it );
+        m_activeClients.erase( aClientName );
+        return;
+    }
+
+    pushCurrentCommit( aClientName, aMessage );
+}
+
+
 void API_HANDLER_EDITOR::pushCurrentCommit( const std::string& aClientName,
                                             const wxString& aMessage )
 {

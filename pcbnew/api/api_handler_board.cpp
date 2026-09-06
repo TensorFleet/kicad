@@ -232,7 +232,7 @@ void API_HANDLER_BOARD::deleteItemsInternal( std::map<KIID, ItemDeletionStatus>&
         commit->Remove( item );
 
     if( !m_activeClients.count( aClientName ) )
-        pushCurrentCommit( aClientName, _( "Deleted items via API" ) );
+        pushImplicitCommit( aClientName, _( "Deleted items via API" ) );
 }
 
 
@@ -476,7 +476,7 @@ HANDLER_RESULT<ItemRequestStatus> API_HANDLER_BOARD::handleCreateUpdateItemsInte
 
     if( !m_activeClients.count( aClientName ) )
     {
-        pushCurrentCommit( aClientName, aCreate ? _( "Created items via API" )
+        pushImplicitCommit( aClientName, aCreate ? _( "Created items via API" )
                                                 : _( "Modified items via API" ) );
     }
 

@@ -84,6 +84,15 @@ protected:
 
     virtual void pushCurrentCommit( const std::string& aClientName, const wxString& aMessage );
 
+    /**
+     * Push the commit a command opened for itself, unless the command staged nothing in it.
+     * An empty commit still advances the document revision and publishes a document-changed
+     * event that names no items, which a client polling GetDocumentRevision reads as a change.
+     * A commit the client opened explicitly with BeginCommit is pushed by handleEndCommit
+     * whether or not anything went into it.
+     */
+    void pushImplicitCommit( const std::string& aClientName, const wxString& aMessage );
+
     HANDLER_RESULT<commands::CreateItemsResponse> handleCreateItems(
         const HANDLER_CONTEXT<commands::CreateItems>& aCtx );
 

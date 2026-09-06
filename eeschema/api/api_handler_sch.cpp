@@ -1874,7 +1874,7 @@ HANDLER_RESULT<ItemRequestStatus> API_HANDLER_SCH::handleCreateUpdateItemsIntern
 
     if( !m_activeClients.contains( aClientName ) )
     {
-        pushCurrentCommit( aClientName, aCreate ? _( "Created items via API" )
+        pushImplicitCommit( aClientName, aCreate ? _( "Created items via API" )
                                                 : _( "Modified items via API" ) );
     }
 
@@ -1910,7 +1910,7 @@ void API_HANDLER_SCH::deleteItemsInternal( std::map<KIID, ItemDeletionStatus>& a
     }
 
     if( !m_activeClients.contains( aClientName ) )
-        pushCurrentCommit( aClientName, _( "Deleted items via API" ) );
+        pushImplicitCommit( aClientName, _( "Deleted items via API" ) );
 }
 
 
