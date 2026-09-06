@@ -218,6 +218,10 @@ private:
     HANDLER_RESULT<types::RunJobResponse> handleRunBoardJobExportIpcD356(
             const HANDLER_CONTEXT<RunBoardJobExportIpcD356>& aCtx );
 
+    // Since 11.0
+    HANDLER_RESULT<types::RunJobResponse> handleRunBoardJobExportSpecctra(
+            const HANDLER_CONTEXT<RunBoardJobExportSpecctra>& aCtx );
+
     HANDLER_RESULT<types::RunJobResponse> handleRunBoardJobExportODB(
             const HANDLER_CONTEXT<RunBoardJobExportODB>& aCtx );
 

@@ -72,6 +72,7 @@
 #include <jobs/job_export_pcb_gerbers.h>
 #include <jobs/job_export_pcb_ipc2581.h>
 #include <jobs/job_export_pcb_ipcd356.h>
+#include <jobs/job_export_pcb_specctra.h>
 #include <jobs/job_export_pcb_odb.h>
 #include <jobs/job_export_pcb_pdf.h>
 #include <jobs/job_export_pcb_pos.h>
@@ -211,6 +212,8 @@ API_HANDLER_PCB::API_HANDLER_PCB( std::shared_ptr<PCB_CONTEXT> aContext, PCB_EDI
             &API_HANDLER_PCB::handleRunBoardJobExportIpc2581 );
     registerHandler<RunBoardJobExportIpcD356, types::RunJobResponse>(
             &API_HANDLER_PCB::handleRunBoardJobExportIpcD356 );
+    registerHandler<RunBoardJobExportSpecctra, types::RunJobResponse>(
+            &API_HANDLER_PCB::handleRunBoardJobExportSpecctra );
     registerHandler<RunBoardJobExportODB, types::RunJobResponse>(
             &API_HANDLER_PCB::handleRunBoardJobExportODB );
     registerHandler<RunBoardJobExportStats, types::RunJobResponse>(
@@ -3369,6 +3372,26 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportIp
 
     std::unique_ptr<JOB_EXPORT_PCB_IPCD356> jobPtr = std::make_unique<JOB_EXPORT_PCB_IPCD356>();
     JOB_EXPORT_PCB_IPCD356&                job = *jobPtr;
+    job.m_filename = pcbContext()->GetCurrentFileName();
+    job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
+
+    return runBoardJob( aCtx.Request.job_settings(), std::move( jobPtr ) );
+}
+
+
+HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportSpecctra(
+        const HANDLER_CONTEXT<RunBoardJobExportSpecctra>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.job_settings().document() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    std::unique_ptr<JOB_EXPORT_PCB_SPECCTRA> jobPtr = std::make_unique<JOB_EXPORT_PCB_SPECCTRA>();
+    JOB_EXPORT_PCB_SPECCTRA&                job = *jobPtr;
     job.m_filename = pcbContext()->GetCurrentFileName();
     job.SetConfiguredOutputPath( wxString::FromUTF8( aCtx.Request.job_settings().output_path() ) );
 

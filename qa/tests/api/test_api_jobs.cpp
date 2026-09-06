@@ -29,6 +29,7 @@
 
 #include <api/board/board_jobs.pb.h>
 #include <api/common/commands/base_commands.pb.h>
+#include <api/common/commands/editor_commands.pb.h>
 #include <wx/utils.h>
 #include <api/board/board_types.pb.h>
 #include <api/schematic/schematic_jobs.pb.h>
@@ -564,6 +565,80 @@ BOOST_FIXTURE_TEST_CASE( ExportBoardSvgAsyncWithInlineOutput, API_SERVER_E2E_FIX
     if( wxFileName::DirExists( outputPath.GetFullPath() ) )
         wxFileName::Rmdir( outputPath.GetFullPath(), wxPATH_RMDIR_RECURSIVE );
     else if( wxFileName::FileExists( outputPath.GetFullPath() ) )
+        wxRemoveFile( outputPath.GetFullPath() );
+
+    wxRemoveFile( tempFile );
+}
+
+
+/// RunBoardJobExportSpecctra writes a DSN design file for an external autorouter, and
+/// return_inline hands its text back to the client.
+BOOST_FIXTURE_TEST_CASE( ExportBoardSpecctra, API_SERVER_E2E_FIXTURE )
+{
+    BOOST_REQUIRE_MESSAGE( Start(), LastError() );
+
+    wxFileName boardPath( wxString::FromUTF8( KI_TEST::GetPcbnewTestDataDir() ), wxS( "api_kitchen_sink.kicad_pcb" ) );
+
+    kiapi::common::types::DocumentSpecifier document;
+
+    BOOST_REQUIRE_MESSAGE( Client().OpenDocument( boardPath.GetFullPath(), &document ),
+                           "OpenDocument failed: " + Client().LastError() );
+
+    auto revision =
+            [&]() -> uint64_t
+            {
+                kiapi::common::commands::GetDocumentRevision request;
+                *request.mutable_document() = document;
+
+                kiapi::common::ApiResponse                        response;
+                kiapi::common::commands::DocumentRevisionResponse result;
+
+                if( !Client().SendCommand( request, &response ) || !response.message().UnpackTo( &result ) )
+                    return 0;
+
+                return result.revision();
+            };
+
+    const uint64_t revisionBefore = revision();
+
+    wxString   tempFile = wxFileName::CreateTempFileName( wxS( "api_job_specctra_" ) );
+    wxFileName outputPath( tempFile );
+    outputPath.SetExt( wxS( "dsn" ) );
+
+    kiapi::board::jobs::RunBoardJobExportSpecctra request;
+    *request.mutable_job_settings()->mutable_document() = document;
+    request.mutable_job_settings()->set_output_path( outputPath.GetFullPath().ToUTF8().data() );
+    request.mutable_job_settings()->set_return_inline( true );
+
+    kiapi::common::types::RunJobResponse response;
+    BOOST_REQUIRE_MESSAGE( Client().RunJob( request, &response ), "RunJob failed: " + Client().LastError() );
+    BOOST_REQUIRE_MESSAGE( response.status() == kiapi::common::types::JS_SUCCESS,
+                           "Job failed: " + wxString::FromUTF8( response.message() ) );
+    BOOST_REQUIRE_EQUAL( response.output_path_size(), 1 );
+    BOOST_CHECK_EQUAL( response.output_path( 0 ), outputPath.GetFullPath().ToUTF8().data() );
+    BOOST_REQUIRE( wxFileName::FileExists( outputPath.GetFullPath() ) );
+
+    BOOST_REQUIRE_EQUAL( response.inline_outputs_size(), 1 );
+    const std::string& dsn = response.inline_outputs( 0 ).data();
+    BOOST_CHECK_EQUAL( response.inline_outputs( 0 ).path(), response.output_path( 0 ) );
+    BOOST_CHECK_EQUAL( dsn, readFile( outputPath.GetFullPath() ) );
+
+    // The design carries the board's copper layers, outline, footprints and nets, in micrometers
+    BOOST_CHECK_EQUAL( dsn.rfind( "(pcb ", 0 ), 0u );
+    BOOST_CHECK( dsn.find( "(resolution um 10)" ) != std::string::npos );
+    BOOST_CHECK( dsn.find( "(layer F.Cu" ) != std::string::npos );
+    BOOST_CHECK( dsn.find( "(layer B.Cu" ) != std::string::npos );
+    BOOST_CHECK( dsn.find( "(boundary" ) != std::string::npos );
+    BOOST_CHECK( dsn.find( "(placement" ) != std::string::npos );
+    BOOST_CHECK( dsn.find( "(network" ) != std::string::npos );
+    BOOST_CHECK( dsn.find( "(net A" ) != std::string::npos );
+    BOOST_CHECK( dsn.find( "(wiring" ) != std::string::npos );
+
+    // The export flips the back-side footprints while it writes and flips them back; it is not
+    // a change to the document
+    BOOST_CHECK_EQUAL( revision(), revisionBefore );
+
+    if( wxFileName::FileExists( outputPath.GetFullPath() ) )
         wxRemoveFile( outputPath.GetFullPath() );
 
     wxRemoveFile( tempFile );
