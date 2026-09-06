@@ -142,6 +142,9 @@ i18n_status.csv
 *-backups
 ~*.lck
 
+# Scratch project folders left behind by API server / probe runs over the QA data
+qa/data/.kicad-web-probe/
+
 # QA dataoutput
 qa/data/**/*.csv
 qa/data/**/*.spice

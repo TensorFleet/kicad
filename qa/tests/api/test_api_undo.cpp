@@ -68,7 +68,7 @@ public:
         wxString pcbData = wxString::FromUTF8( KI_TEST::GetPcbnewTestDataDir() );
         wxString schData = wxString::FromUTF8( KI_TEST::GetEeschemaTestDataDir() );
 
-        for( const wxString& ext : { wxS( "kicad_pro" ), wxS( "kicad_pcb" ), wxS( "kicad_dru" ), wxS( "kicad_prl" ) } )
+        for( const wxString& ext : { wxS( "kicad_pro" ), wxS( "kicad_pcb" ), wxS( "kicad_dru" ) } )
         {
             wxFileName src( pcbData, wxS( "api_kitchen_sink." ) + ext );
 

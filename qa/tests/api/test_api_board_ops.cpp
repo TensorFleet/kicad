@@ -69,7 +69,7 @@ public:
 
         wxString testDataDir = wxString::FromUTF8( KI_TEST::GetPcbnewTestDataDir() );
 
-        for( const wxString& ext : { wxS( "kicad_pro" ), wxS( "kicad_pcb" ), wxS( "kicad_dru" ), wxS( "kicad_prl" ) } )
+        for( const wxString& ext : { wxS( "kicad_pro" ), wxS( "kicad_pcb" ), wxS( "kicad_dru" ) } )
         {
             wxFileName src( testDataDir, wxS( "api_kitchen_sink." ) + ext );
             wxFileName dst( m_dir, src.GetFullName() );
