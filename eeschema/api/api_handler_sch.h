@@ -122,6 +122,15 @@ private:
 
     HANDLER_RESULT<commands::GetItemsResponse> handleGetItems( const HANDLER_CONTEXT<commands::GetItems>& aCtx );
 
+    HANDLER_RESULT<commands::SavedDocumentResponse>
+    handleSaveDocumentToString( const HANDLER_CONTEXT<commands::SaveDocumentToString>& aCtx );
+
+    HANDLER_RESULT<commands::SavedSelectionResponse>
+    handleSaveItemsToString( const HANDLER_CONTEXT<commands::SaveItemsToString>& aCtx );
+
+    HANDLER_RESULT<commands::CreateItemsResponse>
+    handleParseAndCreateItemsFromString( const HANDLER_CONTEXT<commands::ParseAndCreateItemsFromString>& aCtx );
+
     HANDLER_RESULT<commands::GetItemsResponse>
     handleGetItemsById( const HANDLER_CONTEXT<commands::GetItemsById>& aCtx );
 

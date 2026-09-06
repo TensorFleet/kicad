@@ -235,6 +235,113 @@ BOOST_AUTO_TEST_CASE( UnchangedSymbolUpdateKeepsLibSymbols )
 }
 
 
+// Since 11.0: the schematic handler serves the clipboard-format commands.  Pasting a copied
+// symbol keeps the sheet's lib_symbols cache as it is (the pasted text carries an exact copy of
+// the library symbol) and gives the copy new ids.
+BOOST_AUTO_TEST_CASE( SaveAndParseItemsAsString )
+{
+    SCHEMATIC* schematic = loadSchematic( wxS( "api_kitchen_sink" ) );
+
+    API_HANDLER_SCH handler( m_context );
+
+    auto handle = [&]( const auto& aCommand, auto& aResponse )
+    {
+        kiapi::common::ApiRequest request;
+        request.mutable_header()->set_client_name( "kicad.qa" );
+        BOOST_REQUIRE( request.mutable_message()->PackFrom( aCommand ) );
+
+        API_RESULT result = handler.Handle( request );
+        BOOST_REQUIRE_MESSAGE( result.has_value(), "request failed: " << result.error().error_message() );
+        BOOST_REQUIRE( result->message().UnpackTo( &aResponse ) );
+    };
+
+    SCH_SHEET_PATH rootPath = schematic->Hierarchy().at( 0 );
+    SCH_SCREEN*    screen = rootPath.LastScreen();
+    SCH_SYMBOL*    symbol = nullptr;
+
+    for( SCH_ITEM* item : screen->Items().OfType( SCH_SYMBOL_T ) )
+    {
+        symbol = static_cast<SCH_SYMBOL*>( item );
+        break;
+    }
+
+    BOOST_REQUIRE( symbol );
+
+    auto countSymbols = [&]()
+    {
+        size_t count = 0;
+
+        for( SCH_ITEM* item : screen->Items().OfType( SCH_SYMBOL_T ) )
+        {
+            ignore_unused( item );
+            ++count;
+        }
+
+        return count;
+    };
+
+    size_t symbolsBefore = countSymbols();
+    size_t libSymbolsBefore = screen->GetLibSymbols().size();
+
+    // The whole sheet, as it would be written to disk
+    kiapi::common::commands::SaveDocumentToString saveDocument;
+    *saveDocument.mutable_document() = makeDocument( *schematic );
+
+    kiapi::common::commands::SavedDocumentResponse savedDocument;
+    handle( saveDocument, savedDocument );
+    BOOST_CHECK( savedDocument.contents().starts_with( "(kicad_sch" ) );
+    BOOST_CHECK( savedDocument.contents().find( "(lib_symbols" ) != std::string::npos );
+
+    // One symbol in the clipboard format
+    kiapi::common::commands::SaveItemsToString saveItems;
+    *saveItems.mutable_header()->mutable_document() = makeDocument( *schematic );
+    saveItems.add_items()->set_value( symbol->m_Uuid.AsStdString() );
+
+    kiapi::common::commands::SavedSelectionResponse savedItems;
+    handle( saveItems, savedItems );
+    BOOST_REQUIRE_EQUAL( savedItems.ids_size(), 1 );
+    BOOST_CHECK( savedItems.contents().find( "(lib_symbols" ) != std::string::npos );
+
+    kiapi::common::commands::ParseAndCreateItemsFromString paste;
+    *paste.mutable_document() = makeDocument( *schematic );
+    paste.set_contents( savedItems.contents() );
+
+    kiapi::common::commands::CreateItemsResponse created;
+    handle( paste, created );
+
+    BOOST_REQUIRE_EQUAL( created.created_items_size(), 1 );
+    BOOST_CHECK_EQUAL( created.created_items( 0 ).status().code(), kiapi::common::commands::ISC_OK );
+    BOOST_CHECK_EQUAL( countSymbols(), symbolsBefore + 1 );
+    BOOST_CHECK_EQUAL( screen->GetLibSymbols().size(), libSymbolsBefore );
+
+    kiapi::schematic::types::SchematicSymbolInstance pasted;
+    BOOST_REQUIRE( created.created_items( 0 ).item().UnpackTo( &pasted ) );
+    BOOST_CHECK_NE( pasted.id().value(), symbol->m_Uuid.AsStdString() );
+    BOOST_CHECK_EQUAL( pasted.definition().id().entry_name(), symbol->GetLibId().GetUniStringLibItemName().ToStdString() );
+
+    // The copy has pins of its own
+    int pins = 0;
+
+    for( const kiapi::schematic::types::SchematicSymbolChild& child : pasted.definition().items() )
+    {
+        if( child.item().Is<kiapi::schematic::types::SchematicPin>() )
+            ++pins;
+    }
+
+    BOOST_CHECK_EQUAL( pins, static_cast<int>( symbol->GetPins( &rootPath ).size() ) );
+
+    // Text that is not a schematic is a bad request
+    paste.set_contents( "(nope" );
+    kiapi::common::ApiRequest request;
+    request.mutable_header()->set_client_name( "kicad.qa" );
+    BOOST_REQUIRE( request.mutable_message()->PackFrom( paste ) );
+
+    API_RESULT result = handler.Handle( request );
+    BOOST_REQUIRE( !result.has_value() );
+    BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_BAD_REQUEST );
+}
+
+
 BOOST_AUTO_TEST_CASE( CustomPropertyCannotDuplicateSystemProperty )
 {
     SCHEMATIC* schematic = loadSchematic( wxS( "api_kitchen_sink" ) );
