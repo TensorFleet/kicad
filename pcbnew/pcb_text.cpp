@@ -141,6 +141,16 @@ void PCB_TEXT::Serialize( kiapi::board::types::BoardText& boardText ) const
         boardText.mutable_parent()->set_value( board->m_Uuid.AsStdString() );
 
     kiapi::common::PackCustomProperties( boardText.mutable_custom_properties(), *this );
+
+    // A knockout is plotted as the margin box around the glyphs minus the glyphs themselves; that
+    // boolean cannot be expressed by the glyph outlines GetTextAsShapes hands out, so resolve it
+    // here the way BRDITEMS_PLOTTER::PlotText does
+    if( IsKnockout() )
+    {
+        SHAPE_POLY_SET knockout;
+        TransformTextToPolySet( knockout, 0, GetMaxError(), ERROR_INSIDE );
+        kiapi::common::PackPolySet( *boardText.mutable_knockout_shapes(), knockout );
+    }
 }
 
 

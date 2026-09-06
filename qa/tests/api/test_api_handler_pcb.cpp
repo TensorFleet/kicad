@@ -48,6 +48,7 @@
 #include <pcb_barcode.h>
 #include <pcb_table.h>
 #include <pcb_tablecell.h>
+#include <pcb_text.h>
 #include <pcb_textbox.h>
 #include <pcb_track.h>
 #include <board_design_settings.h>
@@ -1386,6 +1387,121 @@ BOOST_AUTO_TEST_CASE( BarcodeCarriesItsEncodedGeometry )
     }
 
     BOOST_CHECK_EQUAL( barcodes, 2 );
+}
+
+
+BOOST_AUTO_TEST_CASE( KnockoutTextCarriesThePolygonsThePlotterFills )
+{
+    BOARD* board = loadBoard( wxS( "api_kitchen_sink" ) );
+
+    int knockouts = 0;
+    int plain = 0;
+
+    for( BOARD_ITEM* item : board->Drawings() )
+    {
+        if( item->Type() != PCB_TEXTBOX_T )
+            continue;
+
+        PCB_TEXTBOX* textbox = static_cast<PCB_TEXTBOX*>( item );
+
+        kiapi::board::types::BoardTextBox message;
+        textbox->Serialize( message );
+
+        if( !textbox->IsKnockout() )
+        {
+            // Nothing is knocked out, so there is nothing to resolve
+            BOOST_CHECK_EQUAL( message.knockout_shapes().polygons_size(), 0 );
+            plain++;
+            continue;
+        }
+
+        // What BRDITEMS_PLOTTER::PlotText fills for a knockout
+        SHAPE_POLY_SET expected;
+        textbox->TransformTextToPolySet( expected, 0, textbox->GetMaxError(), ERROR_INSIDE );
+
+        SHAPE_POLY_SET fromApi = kiapi::common::UnpackPolySet( message.knockout_shapes() );
+
+        BOOST_REQUIRE( fromApi.OutlineCount() > 0 );
+        BOOST_CHECK_EQUAL( fromApi.OutlineCount(), expected.OutlineCount() );
+        BOOST_CHECK( fromApi.BBox() == expected.BBox() );
+        BOOST_CHECK_CLOSE( fromApi.Area(), expected.Area(), 1e-6 );
+
+        // It really is the box minus the glyphs: the glyphs are somewhere, and the fill avoids
+        // all of them
+        SHAPE_POLY_SET glyphs;
+        PCB_TEXTBOX    asPlain( *textbox );
+        asPlain.SetIsKnockout( false );
+        asPlain.TransformTextToPolySet( glyphs, 0, textbox->GetMaxError(), ERROR_INSIDE );
+
+        BOOST_REQUIRE( glyphs.Area() > 0 );
+
+        SHAPE_POLY_SET overlap = fromApi;
+        overlap.BooleanIntersection( glyphs );
+        BOOST_CHECK_SMALL( overlap.Area(), glyphs.Area() / 100 );
+
+        // Deserializing ignores it: the geometry follows from the text
+        google::protobuf::Any any;
+        any.PackFrom( message );
+
+        PCB_TEXTBOX copy( board );
+        BOOST_REQUIRE( copy.Deserialize( any ) );
+        BOOST_CHECK( copy.GetText() == textbox->GetText() );
+
+        knockouts++;
+    }
+
+    BOOST_CHECK_EQUAL( knockouts, 1 );
+    BOOST_CHECK( plain > 0 );
+}
+
+
+BOOST_AUTO_TEST_CASE( KnockoutTextItemCarriesThePolygonsThePlotterFills )
+{
+    BOARD* board = loadBoard( wxS( "api_kitchen_sink" ) );
+
+    PCB_TEXT* text = nullptr;
+
+    for( BOARD_ITEM* item : board->Drawings() )
+    {
+        if( item->Type() == PCB_TEXT_T )
+        {
+            text = static_cast<PCB_TEXT*>( item );
+            break;
+        }
+    }
+
+    BOOST_REQUIRE( text );
+
+    // The board has no knockout PCB_TEXT of its own, so make one out of a plain one
+    kiapi::board::types::BoardText message;
+    text->Serialize( message );
+    BOOST_CHECK_EQUAL( message.knockout_shapes().polygons_size(), 0 );
+
+    text->SetIsKnockout( true );
+    text->Serialize( message );
+
+    SHAPE_POLY_SET expected;
+    text->TransformTextToPolySet( expected, 0, text->GetMaxError(), ERROR_INSIDE );
+
+    SHAPE_POLY_SET fromApi = kiapi::common::UnpackPolySet( message.knockout_shapes() );
+
+    BOOST_REQUIRE( fromApi.OutlineCount() > 0 );
+    BOOST_CHECK_EQUAL( fromApi.OutlineCount(), expected.OutlineCount() );
+    BOOST_CHECK( fromApi.BBox() == expected.BBox() );
+    BOOST_CHECK_CLOSE( fromApi.Area(), expected.Area(), 1e-6 );
+
+    // The margin box around the glyphs, with the glyphs taken out of it
+    SHAPE_POLY_SET glyphs;
+    PCB_TEXT       asPlain( *text );
+    asPlain.SetIsKnockout( false );
+    asPlain.TransformTextToPolySet( glyphs, 0, text->GetMaxError(), ERROR_INSIDE );
+
+    BOOST_REQUIRE( glyphs.Area() > 0 );
+    BOOST_CHECK( fromApi.BBox().Contains( glyphs.BBox() ) );
+
+    SHAPE_POLY_SET overlap = fromApi;
+    overlap.BooleanIntersection( glyphs );
+    BOOST_CHECK_SMALL( overlap.Area(), glyphs.Area() / 100 );
 }
 
 

@@ -651,6 +651,14 @@ message BoardText
 
   // Since: 11.0
   repeated kiapi.common.types.CustomProperty custom_properties = 7;
+
+  // What KiCad fills on the layer when knockout is set: the margin box around the glyphs with the
+  // glyphs subtracted from it, as polygons in board coordinates.  That boolean cannot be expressed
+  // by the glyph outlines GetTextAsShapes hands out, so it is resolved here instead.  Read-only:
+  // KiCad fills this in when it serializes a text item and ignores it when deserializing, because
+  // the geometry follows from the text and its attributes.  Empty unless knockout is set.
+  // Since: 11.0
+  kiapi.common.types.PolySet knockout_shapes = 8;
 }
 
 // A board-specific textbox, existing on a board layer
@@ -675,6 +683,15 @@ message BoardTextBox
   // The stroke of the border drawn around the text box (used when textbox.border_enabled is set)
   // Since: 11.0
   kiapi.common.types.StrokeAttributes border_stroke = 8;
+
+  // What KiCad fills on the layer when knockout is set: the box (including its border, when one is
+  // enabled) with the glyphs subtracted from it, as polygons in board coordinates.  That boolean
+  // cannot be expressed by the glyph outlines GetTextAsShapes hands out, so it is resolved here
+  // instead.  Read-only: KiCad fills this in when it serializes a text box and ignores it when
+  // deserializing, because the geometry follows from the text and its attributes.  Empty unless
+  // knockout is set.
+  // Since: 11.0
+  kiapi.common.types.PolySet knockout_shapes = 9;
 }
 
 // NOTE: There has been some discussion about what to do with pad attributes and properties.
