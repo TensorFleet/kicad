@@ -282,6 +282,27 @@ private:
 /**
  * A holder to handle a list of undo (or redo) commands.
  */
+/**
+ * Receives the undo lists of commits pushed without an editor frame, so that a headless session
+ * (kicad-cli api-server) can undo and redo.  Frames keep their own lists; a commit hands its
+ * list to the sink registered on its TOOL_MANAGER when there is no frame.
+ *
+ * Since 11.0
+ */
+class UNDO_REDO_SINK
+{
+public:
+    virtual ~UNDO_REDO_SINK() = default;
+
+    /**
+     * Take a copy of aItemsList onto the undo stack.  The sink owns the pickers' links and any
+     * item flagged UR_TRANSIENT (removed items) from then on.
+     * @param aAppend adds the pickers to the most recent command instead of starting a new one
+     */
+    virtual void SaveCopyInUndoList( const PICKED_ITEMS_LIST& aItemsList, bool aAppend ) = 0;
+};
+
+
 class UNDO_REDO_CONTAINER
 {
 public:

@@ -86,6 +86,8 @@ protected:
 
     TOOL_MANAGER* editorToolManager() const override { return toolManager(); }
 
+    API_UNDO_STACK* apiUndoStack() const override { return context()->GetUndoStack(); }
+
     std::vector<std::string> actionPrefixes() const override { return { "pcbnew.", "common." }; }
 
     const std::set<std::string>& headlessActions() const override;

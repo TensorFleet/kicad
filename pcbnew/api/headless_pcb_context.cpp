@@ -19,6 +19,7 @@
  */
 
 #include <api/headless_pcb_context.h>
+#include <api/api_undo_pcb.h>
 #include <board.h>
 #include <board_loader.h>
 #include <component_classes/component_class_manager.h>
@@ -50,11 +51,18 @@ HEADLESS_PCB_CONTEXT::HEADLESS_PCB_CONTEXT( std::unique_ptr<BOARD> aBoard, PROJE
 
     m_board->SetProject( m_project );
     m_toolManager->SetEnvironment( m_board.get(), nullptr, nullptr, aSettings, nullptr );
+
+    m_undoStack = MakeBoardUndoStack( m_board.get() );
+    m_toolManager->SetUndoRedoSink( m_undoStack.get() );
 }
 
 
 HEADLESS_PCB_CONTEXT::~HEADLESS_PCB_CONTEXT()
 {
+    // The undo history owns copies of board items; free them while the board is still around
+    m_toolManager->SetUndoRedoSink( nullptr );
+    m_undoStack.reset();
+
     // Sever the board↔project linkage before destruction. The PROJECT holds a raw pointer
     // (m_BoardSettings) to the board's design settings. If the board is destroyed while the
     // project still exists, that pointer becomes dangling.

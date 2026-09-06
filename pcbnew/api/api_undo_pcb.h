@@ -2,7 +2,6 @@
  * This program source code file is part of KiCad, a free EDA CAD application.
  *
  * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
- * @author Jon Evans <jon@craftyjon.com>
  *
  * This program is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -18,34 +17,23 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef KICAD_BOARD_CONTEXT_H
-#define KICAD_BOARD_CONTEXT_H
+#ifndef KICAD_API_UNDO_PCB_H
+#define KICAD_API_UNDO_PCB_H
+
+#include <memory>
 
 class API_UNDO_STACK;
 class BOARD;
-class KIWAY;
-class PROJECT;
-class TOOL_MANAGER;
+class PICKED_ITEMS_LIST;
 
+/**
+ * Put a board back into the state an undo list records, without an editor frame; the list
+ * becomes the redo (or undo) list of the same command.  The item-level counterpart of
+ * PCB_BASE_EDIT_FRAME::PutDataInPreviousState for headless API sessions.  Since 11.0
+ */
+void RestoreBoardUndoList( BOARD* aBoard, PICKED_ITEMS_LIST& aList );
 
-/// Base interface for board-level API contexts; shared by PCB editor and footprint editor
-class BOARD_CONTEXT
-{
-public:
-    virtual ~BOARD_CONTEXT() = default;
+/// An undo stack for a headless board or footprint document.  Since 11.0
+std::unique_ptr<API_UNDO_STACK> MakeBoardUndoStack( BOARD* aBoard );
 
-    virtual BOARD* GetBoard() const = 0;
-
-    virtual PROJECT& Prj() const = 0;
-
-    virtual TOOL_MANAGER* GetToolManager() const = 0;
-
-    virtual KIWAY* GetKiway() const = 0;
-
-    virtual bool CanAcceptApiCommands() const = 0;
-
-    /// @return the undo stack of a headless document, or nullptr in an editor window.  Since 11.0
-    virtual API_UNDO_STACK* GetUndoStack() const { return nullptr; }
-};
-
-#endif // KICAD_BOARD_CONTEXT_H
+#endif // KICAD_API_UNDO_PCB_H

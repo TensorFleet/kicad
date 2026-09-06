@@ -27,6 +27,7 @@
 #include <sch_sheet_path.h>
 #include <wx/string.h>
 
+class API_UNDO_STACK;
 class KIWAY;
 class PROJECT;
 class SCHEMATIC;
@@ -51,6 +52,9 @@ public:
     virtual wxString GetCurrentFileName() const = 0;
 
     virtual bool CanAcceptApiCommands() const = 0;
+
+    /// @return the undo stack of a headless document, or nullptr in an editor window.  Since 11.0
+    virtual API_UNDO_STACK* GetUndoStack() const { return nullptr; }
 
     virtual std::optional<SCH_SHEET_PATH> GetCurrentSheet() const = 0;
 

@@ -21,8 +21,10 @@
 #include <api/api_handler_editor.h>
 
 #include <api/api_enums.h>
+#include <api/api_undo_stack.h>
 #include <api/api_utils.h>
 #include <eda_base_frame.h>
+#include <tool/actions.h>
 #include <eda_item.h>
 #include <title_block.h>
 #include <tool/action_manager.h>
@@ -53,6 +55,11 @@ API_HANDLER_EDITOR::API_HANDLER_EDITOR( EDA_BASE_FRAME* aFrame ) :
     registerHandler<RunAction, RunActionResponse>( &API_HANDLER_EDITOR::handleRunAction );
     registerHandler<GetActions, GetActionsResponse>( &API_HANDLER_EDITOR::handleGetActions );
     registerHandler<GetItemCounts, GetItemCountsResponse>( &API_HANDLER_EDITOR::handleGetItemCounts );
+
+    // Since 11.0
+    registerHandler<Undo, UndoRedoResponse>( &API_HANDLER_EDITOR::handleUndo );
+    registerHandler<Redo, UndoRedoResponse>( &API_HANDLER_EDITOR::handleRedo );
+    registerHandler<GetUndoStack, UndoStackResponse>( &API_HANDLER_EDITOR::handleGetUndoStack );
 }
 
 
@@ -114,10 +121,7 @@ HANDLER_RESULT<GetItemCountsResponse> API_HANDLER_EDITOR::handleGetItemCounts(
 
 void API_HANDLER_EDITOR::advanceRevision( bool aComplete, const COMMIT* aCommit )
 {
-    ++m_revision;
-
     REVISION_CHANGES changes;
-    changes.Revision = m_revision;
     changes.Complete = aComplete;
 
     if( aCommit )
@@ -138,10 +142,199 @@ void API_HANDLER_EDITOR::advanceRevision( bool aComplete, const COMMIT* aCommit 
                 } );
     }
 
-    m_revisionChanges.push_back( std::move( changes ) );
+    advanceRevision( std::move( changes ) );
+}
+
+
+void API_HANDLER_EDITOR::advanceRevision( REVISION_CHANGES aChanges )
+{
+    ++m_revision;
+    aChanges.Revision = m_revision;
+
+    m_revisionChanges.push_back( std::move( aChanges ) );
 
     while( m_revisionChanges.size() > MAX_REVISION_CHANGES )
         m_revisionChanges.pop_front();
+}
+
+
+void API_HANDLER_EDITOR::publishDocumentChanged( const std::string& aClientName, const wxString& aMessage,
+                                                 const std::vector<KIID>& aCreated, const std::vector<KIID>& aUpdated,
+                                                 const std::vector<KIID>& aDeleted )
+{
+    REVISION_CHANGES changes;
+    changes.Complete = true;
+    changes.Changed.insert( changes.Changed.end(), aCreated.begin(), aCreated.end() );
+    changes.Changed.insert( changes.Changed.end(), aUpdated.begin(), aUpdated.end() );
+    changes.Deleted = aDeleted;
+    advanceRevision( std::move( changes ) );
+
+    if( !Server() )
+        return;
+
+    events::Event event;
+    events::DocumentChanged& changed = *event.mutable_document_changed();
+    fillDocumentChanged( changed, aClientName, aMessage, nullptr, nullptr );
+
+    for( const KIID& id : aCreated )
+        changed.add_created()->set_value( id.AsStdString() );
+
+    for( const KIID& id : aUpdated )
+        changed.add_updated()->set_value( id.AsStdString() );
+
+    for( const KIID& id : aDeleted )
+        changed.add_deleted()->set_value( id.AsStdString() );
+
+    publish( event );
+}
+
+
+bool API_HANDLER_EDITOR::undoRedoInFrame( bool aRedo )
+{
+    TOOL_MANAGER* toolMgr = editorToolManager();
+
+    if( !m_frame || !toolMgr )
+        return false;
+
+    if( aRedo ? m_frame->GetRedoCommandCount() == 0 : m_frame->GetUndoCommandCount() == 0 )
+        return false;
+
+    return toolMgr->RunAction( aRedo ? ACTIONS::redo : ACTIONS::undo, true );
+}
+
+
+HANDLER_RESULT<UndoRedoResponse> API_HANDLER_EDITOR::undoRedo( const DocumentSpecifier& aDocument,
+                                                                const std::string& aClientName, bool aRedo,
+                                                                uint32_t aCount )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aDocument );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    // Staged changes hold pointers into the document that an undo would pull from under them
+    for( const auto& [client, commit] : m_commits )
+    {
+        if( commit.second && !commit.second->Empty() )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BUSY );
+            e.set_error_message( fmt::format( "cannot {} while client '{}' has uncommitted changes",
+                                              aRedo ? "redo" : "undo", client ) );
+            return tl::unexpected( e );
+        }
+    }
+
+    const uint32_t   count = std::max<uint32_t>( 1, aCount );
+    UndoRedoResponse response;
+
+    if( API_UNDO_STACK* stack = apiUndoStack() )
+    {
+        for( uint32_t ii = 0; ii < count; ii++ )
+        {
+            std::optional<API_UNDO_STACK::RESULT> result = aRedo ? stack->Redo() : stack->Undo();
+
+            if( !result )
+                break;
+
+            response.set_applied( response.applied() + 1 );
+
+            wxString message = wxString::Format( aRedo ? _( "Redo %s" ) : _( "Undo %s" ), result->Entry.Description );
+            publishDocumentChanged( aClientName, message, result->Created, result->Updated, result->Deleted );
+        }
+
+        response.set_undo_count( static_cast<uint32_t>( stack->UndoCount() ) );
+        response.set_redo_count( static_cast<uint32_t>( stack->RedoCount() ) );
+    }
+    else if( m_frame )
+    {
+        for( uint32_t ii = 0; ii < count; ii++ )
+        {
+            if( !undoRedoInFrame( aRedo ) )
+                break;
+
+            response.set_applied( response.applied() + 1 );
+
+            // The frame's undo does not say which items it touched
+            bumpRevision();
+        }
+
+        response.set_undo_count( static_cast<uint32_t>( m_frame->GetUndoCommandCount() ) );
+        response.set_redo_count( static_cast<uint32_t>( m_frame->GetRedoCommandCount() ) );
+    }
+    else
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_UNIMPLEMENTED );
+        e.set_error_message( "this document keeps no undo history" );
+        return tl::unexpected( e );
+    }
+
+    return response;
+}
+
+
+HANDLER_RESULT<UndoRedoResponse> API_HANDLER_EDITOR::handleUndo( const HANDLER_CONTEXT<Undo>& aCtx )
+{
+    return undoRedo( aCtx.Request.document(), aCtx.ClientName, false, aCtx.Request.count() );
+}
+
+
+HANDLER_RESULT<UndoRedoResponse> API_HANDLER_EDITOR::handleRedo( const HANDLER_CONTEXT<Redo>& aCtx )
+{
+    return undoRedo( aCtx.Request.document(), aCtx.ClientName, true, aCtx.Request.count() );
+}
+
+
+HANDLER_RESULT<UndoStackResponse> API_HANDLER_EDITOR::handleGetUndoStack( const HANDLER_CONTEXT<GetUndoStack>& aCtx )
+{
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.document() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    UndoStackResponse response;
+
+    auto packEntry =
+            []( UndoStackEntry* aOut, const API_UNDO_STACK::ENTRY& aEntry )
+            {
+                aOut->set_description( aEntry.Description.ToUTF8() );
+                aOut->set_client_name( aEntry.ClientName );
+                aOut->set_item_count( static_cast<uint32_t>( aEntry.ItemCount ) );
+
+                if( aEntry.CommitId )
+                    aOut->mutable_commit_id()->set_value( aEntry.CommitId->AsStdString() );
+            };
+
+    if( API_UNDO_STACK* stack = apiUndoStack() )
+    {
+        for( const API_UNDO_STACK::ENTRY& entry : stack->UndoEntries() )
+            packEntry( response.add_undo(), entry );
+
+        for( const API_UNDO_STACK::ENTRY& entry : stack->RedoEntries() )
+            packEntry( response.add_redo(), entry );
+    }
+    else if( m_frame )
+    {
+        for( const PICKED_ITEMS_LIST* command : m_frame->GetUndoList().m_CommandsList )
+        {
+            UndoStackEntry* entry = response.add_undo();
+            entry->set_description( command->GetDescription().ToUTF8() );
+            entry->set_item_count( static_cast<uint32_t>( command->GetCount() ) );
+        }
+
+        for( const PICKED_ITEMS_LIST* command : m_frame->GetRedoList().m_CommandsList )
+        {
+            UndoStackEntry* entry = response.add_redo();
+            entry->set_description( command->GetDescription().ToUTF8() );
+            entry->set_item_count( static_cast<uint32_t>( command->GetCount() ) );
+        }
+    }
+
+    return response;
 }
 
 
@@ -248,6 +441,9 @@ HANDLER_RESULT<RunActionResponse> API_HANDLER_EDITOR::handleRunAction( const HAN
 
         ensureHeadlessTools();
     }
+
+    if( API_UNDO_STACK* stack = apiUndoStack() )
+        stack->SetNextAttribution( aCtx.ClientName, std::nullopt );
 
     if( toolMgr->RunAction( action, true ) )
     {
@@ -529,6 +725,10 @@ void API_HANDLER_EDITOR::pushCurrentCommit( const std::string& aClientName,
 
     events::Event event;
     fillDocumentChanged( *event.mutable_document_changed(), aClientName, message, &id, commit.get() );
+
+    // The commit hands its undo list to the headless stack while it pushes; name its author
+    if( API_UNDO_STACK* stack = apiUndoStack() )
+        stack->SetNextAttribution( aClientName, id );
 
     commit->Push( message );
 

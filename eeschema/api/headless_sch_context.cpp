@@ -19,6 +19,7 @@
  */
 
 #include <api/headless_sch_context.h>
+#include <api/api_undo_sch.h>
 #include <api/sch_api_save.h>
 #include <project.h>
 #include <schematic.h>
@@ -39,10 +40,18 @@ HEADLESS_SCH_CONTEXT::HEADLESS_SCH_CONTEXT( SCHEMATIC* aSchematic, PROJECT* aPro
 
     m_toolManager->SetEnvironment( m_schematic, nullptr, nullptr,
                                    Kiface().KifaceSettings(), nullptr );
+
+    m_undoStack = MakeSchematicUndoStack( m_schematic, m_toolManager.get() );
+    m_toolManager->SetUndoRedoSink( m_undoStack.get() );
 }
 
 
-HEADLESS_SCH_CONTEXT::~HEADLESS_SCH_CONTEXT() = default;
+HEADLESS_SCH_CONTEXT::~HEADLESS_SCH_CONTEXT()
+{
+    // The undo history owns copies of schematic items; free them while the schematic is around
+    m_toolManager->SetUndoRedoSink( nullptr );
+    m_undoStack.reset();
+}
 
 
 SCHEMATIC* HEADLESS_SCH_CONTEXT::GetSchematic() const

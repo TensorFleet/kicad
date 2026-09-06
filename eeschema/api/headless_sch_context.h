@@ -25,6 +25,7 @@
 
 #include <wx/string.h>
 
+#include <api/api_undo_stack.h>
 #include <api/sch_context.h>
 
 class KIWAY;
@@ -58,12 +59,17 @@ public:
 
     bool SaveSchematicCopy( const wxString& aFileName, bool aCreateProject ) override;
 
+    API_UNDO_STACK* GetUndoStack() const override { return m_undoStack.get(); }
+
 private:
     // All owned by caller (the kiface)
     SCHEMATIC*                    m_schematic;
     PROJECT*                      m_project;
     KIWAY*                        m_kiway;
     std::unique_ptr<TOOL_MANAGER> m_toolManager;
+
+    /// Declared after the tool manager: cleared explicitly before the schematic goes
+    std::unique_ptr<API_UNDO_STACK> m_undoStack;
 };
 
 #endif

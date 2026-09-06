@@ -23,6 +23,7 @@
 
 #include <api/api_handler_board.h>
 #include <api/pcb_context.h>
+#include <undo_redo_container.h>
 #include <api/board/board_jobs.pb.h>
 #include <api/common/commands/cross_probe_commands.pb.h>
 #include <api/common/commands/project_commands.pb.h>
@@ -251,6 +252,10 @@ private:
      * @return an error status if a net is unknown; an empty set if the request named none
      */
     HANDLER_RESULT<std::set<int>> resolveNets( const google::protobuf::RepeatedPtrField<board::types::Net>& aNets );
+
+    /// Record a headless origin change on the undo stack, as the origin tools do in the editor
+    void recordOriginUndo( const std::string& aClientName, UNDO_REDO aType, const VECTOR2I& aFrom,
+                           const VECTOR2I& aTo );
 
 protected:
     kiapi::common::types::DocumentType thisDocumentType() const override

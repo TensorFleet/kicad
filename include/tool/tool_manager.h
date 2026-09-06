@@ -43,6 +43,7 @@ struct VC_SETTINGS;
 class COMMIT;
 class TOOLS_HOLDER;
 class TOOL_ACTION;
+class UNDO_REDO_SINK;
 class ACTION_MANAGER;
 class ACTION_MENU;
 class APP_SETTINGS_BASE;
@@ -403,6 +404,14 @@ public:
     TOOLS_HOLDER* GetToolHolder() const { return m_frame; }
 
     /**
+     * Register where commits pushed without an editor frame hand their undo lists (a headless API
+     * session's undo stack).  Not owned.  Since 11.0
+     */
+    void SetUndoRedoSink( UNDO_REDO_SINK* aSink ) { m_undoSink = aSink; }
+
+    UNDO_REDO_SINK* GetUndoRedoSink() const { return m_undoSink; }
+
+    /**
      * Return id of the tool that is on the top of the active tools stack (was invoked the
      * most recently).
      *
@@ -669,6 +678,9 @@ private:
     KIGFX::VIEW_CONTROLS* m_viewControls;
     TOOLS_HOLDER*         m_frame;
     APP_SETTINGS_BASE*    m_settings;
+
+    /// Undo lists of frameless commits go here; see SetUndoRedoSink
+    UNDO_REDO_SINK*       m_undoSink = nullptr;
 
     /// Queue that stores events to be processed at the end of the event processing cycle.
     std::list<TOOL_EVENT> m_eventQueue;

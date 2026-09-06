@@ -25,6 +25,7 @@
 
 #include <wx/string.h>
 
+#include <api/api_undo_stack.h>
 #include <api/pcb_context.h>
 
 class APP_SETTINGS_BASE;
@@ -64,11 +65,16 @@ public:
 
     void OnNetlistChanged( BOARD_NETLIST_UPDATER& aUpdater ) override;
 
+    API_UNDO_STACK* GetUndoStack() const override { return m_undoStack.get(); }
+
 private:
     std::unique_ptr<BOARD> m_board;
     PROJECT* m_project;
     KIWAY* m_kiway;
     std::unique_ptr<TOOL_MANAGER> m_toolManager;
+
+    /// Declared after the board and tool manager: cleared explicitly before they go
+    std::unique_ptr<API_UNDO_STACK> m_undoStack;
 };
 
 #endif

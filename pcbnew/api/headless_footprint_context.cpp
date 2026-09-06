@@ -18,6 +18,7 @@
  */
 
 #include <api/headless_footprint_context.h>
+#include <api/api_undo_pcb.h>
 #include <board.h>
 #include <footprint.h>
 #include <footprint_library_adapter.h>
@@ -47,10 +48,18 @@ HEADLESS_FOOTPRINT_CONTEXT::HEADLESS_FOOTPRINT_CONTEXT( std::unique_ptr<FOOTPRIN
     aFootprint->SetParent( m_board.get() );
     m_board->Add( aFootprint.release() );
     m_toolManager->SetEnvironment( m_board.get(), nullptr, nullptr, aSettings, nullptr );
+
+    m_undoStack = MakeBoardUndoStack( m_board.get() );
+    m_toolManager->SetUndoRedoSink( m_undoStack.get() );
 }
 
 
-HEADLESS_FOOTPRINT_CONTEXT::~HEADLESS_FOOTPRINT_CONTEXT() = default;
+HEADLESS_FOOTPRINT_CONTEXT::~HEADLESS_FOOTPRINT_CONTEXT()
+{
+    // The undo history owns copies of board items; free them while the board is still around
+    m_toolManager->SetUndoRedoSink( nullptr );
+    m_undoStack.reset();
+}
 
 
 BOARD* HEADLESS_FOOTPRINT_CONTEXT::GetBoard() const
