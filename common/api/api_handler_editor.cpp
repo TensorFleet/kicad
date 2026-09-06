@@ -54,6 +54,141 @@ API_HANDLER_EDITOR::API_HANDLER_EDITOR( EDA_BASE_FRAME* aFrame ) :
             &API_HANDLER_EDITOR::handleGetDocumentRevision );
     registerHandler<RunAction, RunActionResponse>( &API_HANDLER_EDITOR::handleRunAction );
     registerHandler<GetActions, GetActionsResponse>( &API_HANDLER_EDITOR::handleGetActions );
+    registerHandler<GetItemCounts, GetItemCountsResponse>( &API_HANDLER_EDITOR::handleGetItemCounts );
+}
+
+
+HANDLER_RESULT<GetItemCountsResponse> API_HANDLER_EDITOR::handleGetItemCounts(
+        const HANDLER_CONTEXT<GetItemCounts>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.document() );
+
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    GetItemCountsResponse response;
+    response.set_revision( m_revision );
+
+    // Dimension subtypes are one API type
+    std::map<types::KiCadObjectType, uint32_t> counts;
+
+    for( const auto& [type, count] : countItems( aCtx.Request.document() ) )
+    {
+        types::KiCadObjectType protoType;
+
+        switch( type )
+        {
+        case PCB_DIM_ALIGNED_T:
+        case PCB_DIM_CENTER_T:
+        case PCB_DIM_RADIAL_T:
+        case PCB_DIM_ORTHOGONAL_T:
+        case PCB_DIM_LEADER_T:
+            protoType = types::KiCadObjectType::KOT_PCB_DIMENSION;
+            break;
+
+        default:
+            try
+            {
+                protoType = ToProtoEnum<KICAD_T, types::KiCadObjectType>( type );
+            }
+            catch( ... )
+            {
+                continue;
+            }
+        }
+
+        counts[protoType] += count;
+    }
+
+    for( const auto& [type, count] : counts )
+    {
+        ItemCount* entry = response.add_counts();
+        entry->set_type( type );
+        entry->set_count( count );
+    }
+
+    return response;
+}
+
+
+void API_HANDLER_EDITOR::advanceRevision( bool aComplete, const COMMIT* aCommit )
+{
+    ++m_revision;
+
+    REVISION_CHANGES changes;
+    changes.Revision = m_revision;
+    changes.Complete = aComplete;
+
+    if( aCommit )
+    {
+        aCommit->ForEachEntry(
+                [&]( EDA_ITEM* aItem, CHANGE_TYPE aType )
+                {
+                    if( !aItem )
+                        return;
+
+                    switch( aType )
+                    {
+                    case CHT_ADD:
+                    case CHT_MODIFY: changes.Changed.push_back( aItem->m_Uuid ); break;
+                    case CHT_REMOVE: changes.Deleted.push_back( aItem->m_Uuid ); break;
+                    default:         break;
+                    }
+                } );
+    }
+
+    m_revisionChanges.push_back( std::move( changes ) );
+
+    while( m_revisionChanges.size() > MAX_REVISION_CHANGES )
+        m_revisionChanges.pop_front();
+}
+
+
+std::optional<API_HANDLER_EDITOR::REVISION_CHANGES> API_HANDLER_EDITOR::changesSince( uint64_t aRevision ) const
+{
+    REVISION_CHANGES result;
+    result.Revision = m_revision;
+    result.Complete = true;
+
+    if( aRevision >= m_revision )
+        return result;
+
+    // Every step in (aRevision, m_revision] must be in the log
+    if( m_revisionChanges.empty() || m_revisionChanges.front().Revision > aRevision + 1 )
+        return std::nullopt;
+
+    // Replayed in order so that an item deleted and re-created (a footprint update replaces the
+    // object under the same id) ends up changed, and one changed then deleted ends up deleted
+    std::set<KIID> changed, deleted;
+
+    for( const REVISION_CHANGES& step : m_revisionChanges )
+    {
+        if( step.Revision <= aRevision )
+            continue;
+
+        if( !step.Complete )
+            return std::nullopt;
+
+        for( const KIID& id : step.Deleted )
+        {
+            changed.erase( id );
+            deleted.insert( id );
+        }
+
+        for( const KIID& id : step.Changed )
+        {
+            deleted.erase( id );
+            changed.insert( id );
+        }
+    }
+
+    result.Changed.assign( changed.begin(), changed.end() );
+    result.Deleted.assign( deleted.begin(), deleted.end() );
+
+    return result;
 }
 
 
@@ -392,7 +527,7 @@ void API_HANDLER_EDITOR::pushCurrentCommit( const std::string& aClientName,
 
     wxString message = aMessage.IsEmpty() ? m_defaultCommitMessage : aMessage;
 
-    ++m_revision;
+    advanceRevision( true, commit.get() );
 
     events::Event event;
     fillDocumentChanged( *event.mutable_document_changed(), aClientName, message, &id, commit.get() );
@@ -426,7 +561,7 @@ void API_HANDLER_EDITOR::bumpRevision()
 void API_HANDLER_EDITOR::publishDocumentChanged( const std::string& aClientName, const wxString& aMessage,
                                                  const KIID* aCommitId, const COMMIT* aCommit )
 {
-    ++m_revision;
+    advanceRevision( aCommit != nullptr, aCommit );
 
     if( !Server() )
         return;
@@ -477,7 +612,8 @@ void API_HANDLER_EDITOR::fillDocumentChanged( events::DocumentChanged& aEvent, c
 
 void API_HANDLER_EDITOR::notifyDocumentSaved( const wxString& aPath )
 {
-    ++m_revision;
+    // Nothing in the document changed
+    advanceRevision( true, nullptr );
 
     if( !Server() )
         return;

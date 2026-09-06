@@ -269,6 +269,17 @@ message CreateItemsResponse
   repeated ItemCreationResult created_items = 3;
 }
 
+// A window into a list of items; see GetItems.page
+// Since 11.0
+message ItemPage
+{
+  // Index of the first item to return
+  uint32 offset = 1;
+
+  // Maximum number of items to return; 0 means no limit
+  uint32 limit = 2;
+}
+
 message GetItems
 {
   // Specifies which document to query, which fields to return, etc.
@@ -276,6 +287,42 @@ message GetItems
 
   // List of one or more types of items to retreive
   repeated kiapi.common.types.KiCadObjectType types = 2;
+
+  // Return only this window of the matching items.  GetItemsResponse.total reports how many
+  // items matched before paging.
+  // Since 11.0
+  ItemPage page = 3;
+
+  // Return only the items created or changed after this document revision (see
+  // GetDocumentRevision), plus the ids of the items deleted since then.  Changes are tracked for
+  // a bounded number of recent revisions; when the given revision is too old, or the document was
+  // changed in a way KiCad could not attribute to items, every matching item is returned.
+  // Since 11.0
+  optional uint64 since_revision = 4;
+}
+
+// Counts the items of each type in a document without serializing them.
+// Returns GetItemCountsResponse
+// Since 11.0
+message GetItemCounts
+{
+  kiapi.common.types.DocumentSpecifier document = 1;
+}
+
+// Since 11.0
+message ItemCount
+{
+  kiapi.common.types.KiCadObjectType type = 1;
+  uint32 count = 2;
+}
+
+// Since 11.0
+message GetItemCountsResponse
+{
+  repeated ItemCount counts = 1;
+
+  // The document revision the counts were taken at
+  uint64 revision = 2;
 }
 
 message GetItemsById
@@ -295,6 +342,18 @@ message GetItemsResponse
   kiapi.common.types.ItemRequestStatus status = 2;
 
   repeated google.protobuf.Any items = 3;
+
+  // Number of items that matched the request before GetItems.page was applied
+  // Since 11.0
+  uint32 total = 4;
+
+  // The document revision the items were read at
+  // Since 11.0
+  uint64 revision = 5;
+
+  // With GetItems.since_revision: items deleted since that revision
+  // Since 11.0
+  repeated kiapi.common.types.KIID deleted_ids = 6;
 }
 
 // Updates items in a given document

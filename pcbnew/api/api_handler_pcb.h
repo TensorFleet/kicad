@@ -62,6 +62,16 @@ private:
     HANDLER_RESULT<commands::GetItemsResponse> handleGetItems(
             const HANDLER_CONTEXT<commands::GetItems>& aCtx );
 
+    /**
+     * Gather the board items of the given types, as GetItems serves them.
+     * @param aTypesRequested receives the types to keep (dimension subtypes are expanded)
+     * @return false if none of the types is served by the board editor
+     */
+    bool collectItems( const std::vector<KICAD_T>& aTypes, std::vector<BOARD_ITEM*>& aItems,
+                       std::set<KICAD_T>& aTypesRequested ) const;
+
+    std::map<KICAD_T, uint32_t> countItems( const DocumentSpecifier& aDocument ) override;
+
     HANDLER_RESULT<BoardEnabledLayersResponse> handleSetBoardEnabledLayers(
             const HANDLER_CONTEXT<SetBoardEnabledLayers>& aCtx );
 

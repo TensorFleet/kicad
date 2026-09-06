@@ -56,6 +56,12 @@ private:
     HANDLER_RESULT<commands::GetItemsResponse> handleGetItems(
             const HANDLER_CONTEXT<commands::GetItems>& aCtx );
 
+    /// See API_HANDLER_PCB::collectItems
+    bool collectItems( const std::vector<KICAD_T>& aTypes, std::vector<BOARD_ITEM*>& aItems,
+                       std::set<KICAD_T>& aTypesRequested ) const;
+
+    std::map<KICAD_T, uint32_t> countItems( const DocumentSpecifier& aDocument ) override;
+
 protected:
     kiapi::common::types::DocumentType thisDocumentType() const override
     {
