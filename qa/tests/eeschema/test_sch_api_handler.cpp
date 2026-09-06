@@ -25,6 +25,7 @@
 #include <api/api_utils.h>
 #include <api/common/commands/editor_commands.pb.h>
 #include <api/common/envelope.pb.h>
+#include <api/api_sch_utils.h>
 #include <api/headless_sch_context.h>
 #include <api/schematic/schematic_types.pb.h>
 #include <schematic_utils/schematic_file_util.h>
@@ -35,6 +36,8 @@
 #include <api/schematic/schematic_commands.pb.h>
 #include <sch_screen.h>
 #include <sch_marker.h>
+#include <sch_symbol.h>
+#include <sch_pin.h>
 #include <erc/erc_settings.h>
 #include <erc/erc_item.h>
 
@@ -164,6 +167,71 @@ BOOST_AUTO_TEST_CASE( TitleBlockResolvesSheetHeadless )
     result = handler.Handle( request );
     BOOST_REQUIRE( !result.has_value() );
     BOOST_CHECK_EQUAL( result.error().status(), kiapi::common::ApiStatusCode::AS_UNHANDLED );
+}
+
+
+// Since 11.0: sending a symbol back unchanged through UpdateItems keeps the library symbol the
+// sheet already has (no "<name>_1" entry in lib_symbols, no re-linking) and the pin order.
+BOOST_AUTO_TEST_CASE( UnchangedSymbolUpdateKeepsLibSymbols )
+{
+    SCHEMATIC* schematic = loadSchematic( wxS( "api_kitchen_sink" ) );
+
+    API_HANDLER_SCH handler( m_context );
+
+    SCH_SHEET_PATH rootPath = schematic->Hierarchy().at( 0 );
+    SCH_SCREEN*    screen = rootPath.LastScreen();
+    SCH_SYMBOL*    symbol = nullptr;
+
+    for( SCH_ITEM* item : screen->Items().OfType( SCH_SYMBOL_T ) )
+    {
+        symbol = static_cast<SCH_SYMBOL*>( item );
+
+        if( symbol->UseLibIdLookup() && symbol->GetLibSymbolRef() )
+            break;
+    }
+
+    BOOST_REQUIRE( symbol );
+
+    std::vector<wxString> libNamesBefore;
+
+    for( const auto& [name, unused] : screen->GetLibSymbols() )
+        libNamesBefore.push_back( name );
+
+    std::vector<KIID> pinOrderBefore;
+
+    for( const std::unique_ptr<SCH_PIN>& pin : symbol->GetRawPins() )
+        pinOrderBefore.push_back( pin->m_Uuid );
+
+    BOOST_REQUIRE_GT( pinOrderBefore.size(), 1 );
+
+    kiapi::schematic::types::SchematicSymbolInstance packed;
+    BOOST_REQUIRE( PackSymbol( &packed, symbol, rootPath ) );
+
+    kiapi::common::commands::UpdateItems command;
+    *command.mutable_header()->mutable_document() = makeDocument( *schematic );
+    command.add_items()->PackFrom( packed );
+
+    kiapi::common::ApiRequest request;
+    request.mutable_header()->set_client_name( "kicad.qa" );
+    BOOST_REQUIRE( request.mutable_message()->PackFrom( command ) );
+
+    API_RESULT result = handler.Handle( request );
+    BOOST_REQUIRE_MESSAGE( result.has_value(), result.error().error_message() );
+
+    std::vector<wxString> libNamesAfter;
+
+    for( const auto& [name, unused] : screen->GetLibSymbols() )
+        libNamesAfter.push_back( name );
+
+    BOOST_CHECK( libNamesAfter == libNamesBefore );
+    BOOST_CHECK( symbol->UseLibIdLookup() );
+
+    std::vector<KIID> pinOrderAfter;
+
+    for( const std::unique_ptr<SCH_PIN>& pin : symbol->GetRawPins() )
+        pinOrderAfter.push_back( pin->m_Uuid );
+
+    BOOST_CHECK( pinOrderAfter == pinOrderBefore );
 }
 
 

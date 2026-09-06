@@ -54,6 +54,21 @@ void PackLibSymbol( kiapi::schematic::types::SchematicSymbol* aOutput, const LIB
 bool UnpackSymbol( SCH_SYMBOL* aOutput, const kiapi::schematic::types::SchematicSymbolInstance& aInput );
 
 /**
+ * If the library definition carried by @a aInput is the one @a aExisting already has, give
+ * @a aTarget (the unpacked replacement for aExisting) a copy of aExisting's library symbol and
+ * aExisting's pin order instead of the definition rebuilt from the message.  The rebuilt
+ * definition is not byte-for-byte what was loaded (draw item order, pin name offset, ...), so
+ * an unchanged symbol would otherwise rewrite the sheet's lib_symbols cache under a new name.
+ *
+ * Since 11.0.
+ *
+ * @return true if the library symbol was reused
+ */
+bool ReuseUnchangedLibSymbol( SCH_SYMBOL* aTarget, SCH_SYMBOL* aExisting,
+                              const kiapi::schematic::types::SchematicSymbolInstance& aInput,
+                              const SCH_SHEET_PATH& aPath );
+
+/**
  * Apply placement-specific data to an @a aSymbol at @a aPath: reference, unit, and
  * the per-placement attribute and field differentials.
  *

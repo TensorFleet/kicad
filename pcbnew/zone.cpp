@@ -267,6 +267,8 @@ void ZONE::Serialize( google::protobuf::Any& aContainer ) const
     zone.set_name( m_zoneName.ToUTF8() );
     zone.set_priority( m_priority );
     zone.set_filled( m_isFilled );
+    zone.set_locked( IsLocked() ? kiapi::common::types::LockedState::LS_LOCKED
+                                : kiapi::common::types::LockedState::LS_UNLOCKED );
 
     if( FOOTPRINT* parent = GetParentFootprint() )
         zone.mutable_parent()->set_value( parent->m_Uuid.AsStdString() );
@@ -381,6 +383,7 @@ bool ZONE::Deserialize( const google::protobuf::Any& aContainer )
     SetLayerSet( UnpackLayerSet( zone.layers() ) );
     SetAssignedPriority( zone.priority() );
     SetZoneName( wxString::FromUTF8( zone.name() ) );
+    SetLocked( zone.locked() == kiapi::common::types::LockedState::LS_LOCKED );
     kiapi::common::UnpackCustomProperties( zone.custom_properties(), *this );
 
     if( zone.type() == types::ZoneType::ZT_RULE_AREA )
