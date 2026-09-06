@@ -103,6 +103,9 @@ private:
 
     void initFromOther( const COLOR_SETTINGS& aOther );
 
+    /// Fills m_colorKeys from the COLOR_MAP_PARAMs currently in m_params
+    void captureColorKeys();
+
 private:
     wxString m_displayName;
     bool     m_overrideSchItemColors;
@@ -114,6 +117,14 @@ private:
     std::unordered_map<int, COLOR4D> m_colors;
 
     std::unordered_map<int, COLOR4D> m_defaultColors;
+
+    /**
+     * The JSON path and layer id of every color this theme knows, captured while the parameters
+     * are built.  A theme that drops its parameters (the built-in Classic theme does, to disable
+     * load and store) or that was copy-constructed has no COLOR_MAP_PARAM left to enumerate, so
+     * the keys are remembered here instead.
+     */
+    std::vector<std::pair<std::string, int>> m_colorKeys;
 };
 
 class COLOR_MAP_PARAM : public PARAM_BASE
