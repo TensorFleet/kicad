@@ -207,6 +207,13 @@ void PCB_BARCODE::Serialize( google::protobuf::Any& aContainer ) const
                                    : kiapi::common::types::LockedState::LS_UNLOCKED );
 
     kiapi::common::PackCustomProperties( barcode.mutable_custom_properties(), *this );
+
+    // Hand out the encoded geometry, built the way BRDITEMS_PLOTTER::PlotBarCode builds it, so
+    // that a client does not need its own encoder to draw what KiCad draws
+    SHAPE_POLY_SET shapes;
+    TransformShapeToPolySet( shapes, GetLayer(), 0, 0, ERROR_INSIDE );
+    kiapi::common::PackPolySet( *barcode.mutable_shapes(), shapes );
+
     aContainer.PackFrom( barcode );
 }
 
