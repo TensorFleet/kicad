@@ -31,6 +31,8 @@
 #include <api/schematic/schematic_commands.pb.h>
 #include <api/schematic/schematic_jobs.pb.h>
 #include <kiid.h>
+#include <sch_sheet_path.h>
+#include <unordered_set>
 
 using namespace kiapi;
 using namespace kiapi::common;
@@ -228,6 +230,50 @@ private:
     handleGetCurrentVariant( const HANDLER_CONTEXT<commands::GetCurrentVariant>& aCtx );
     HANDLER_RESULT<commands::ExpandTextVariablesResponse>
     handleExpandTextVariables( const HANDLER_CONTEXT<commands::ExpandTextVariables>& aCtx );
+
+    // Since 11.0
+    HANDLER_RESULT<kiapi::schematic::commands::AnnotateResponse>
+    handleAnnotate( const HANDLER_CONTEXT<kiapi::schematic::commands::Annotate>& aCtx );
+
+    HANDLER_RESULT<kiapi::schematic::commands::AnnotateResponse>
+    handleClearAnnotation( const HANDLER_CONTEXT<kiapi::schematic::commands::ClearAnnotation>& aCtx );
+
+    HANDLER_RESULT<kiapi::schematic::commands::SyncSchematicToBoardResponse>
+    handleSyncSchematicToBoard( const HANDLER_CONTEXT<kiapi::schematic::commands::SyncSchematicToBoard>& aCtx );
+
+    HANDLER_RESULT<kiapi::schematic::commands::SchematicSettings>
+    handleGetSchematicSettings( const HANDLER_CONTEXT<kiapi::schematic::commands::GetSchematicSettings>& aCtx );
+
+    HANDLER_RESULT<kiapi::schematic::commands::SchematicSettings>
+    handleSetSchematicSettings( const HANDLER_CONTEXT<kiapi::schematic::commands::SetSchematicSettings>& aCtx );
+
+    HANDLER_RESULT<kiapi::schematic::commands::SymbolFieldsTableResponse>
+    handleGetSymbolFieldsTable( const HANDLER_CONTEXT<kiapi::schematic::commands::GetSymbolFieldsTable>& aCtx );
+
+    HANDLER_RESULT<kiapi::schematic::commands::SetSymbolFieldsResponse>
+    handleSetSymbolFields( const HANDLER_CONTEXT<kiapi::schematic::commands::SetSymbolFields>& aCtx );
+
+    HANDLER_RESULT<kiapi::schematic::commands::AssignFootprintsResponse>
+    handleAssignFootprints( const HANDLER_CONTEXT<kiapi::schematic::commands::AssignFootprints>& aCtx );
+
+    /**
+     * Resolve the scope of an annotation command to a sheet list and (for ANS_SELECTION) the
+     * selected symbols.  @return an error status if the scope or the items are invalid
+     */
+    HANDLER_RESULT<bool> resolveAnnotateScope( const DocumentSpecifier& aDocument,
+                                               kiapi::schematic::commands::AnnotateScope aScope,
+                                               const google::protobuf::RepeatedPtrField<types::KIID>& aItems,
+                                               bool aRecursive, SCH_SHEET_PATH& aCurrentSheet,
+                                               SCH_SHEET_LIST& aSubSheets, SCH_SHEET_LIST& aSelectedSheets,
+                                               std::unordered_set<SCH_SYMBOL*>& aSelectedSymbols );
+
+    void packSchematicSettings( kiapi::schematic::commands::SchematicSettings& aOut ) const;
+
+    /**
+     * Give a newly created sheet a screen: load the file it names if that exists, otherwise
+     * create the file on disk.  @return an error message, or empty on success
+     */
+    wxString attachSheetFile( SCH_SHEET* aSheet, const SCH_SHEET_PATH& aParentPath );
 
     SCHEMATIC* schematic() const;
 

@@ -25,6 +25,9 @@
 #include <api/api_utils.h>
 #include <api/cross_probe_client.h>
 #include <api/sch_context.h>
+#include <api/api_server.h>
+#include <api/sch_api_save.h>
+#include <api/board/board_commands.pb.h>
 #include <fmt.h>
 #include <fmt/ranges.h>
 #include <wx/log.h>
@@ -49,6 +52,7 @@
 #include <string_utils.h>
 #include <sch_edit_frame.h>
 #include <sch_label.h>
+#include <sch_reference_list.h>
 #include <sch_screen.h>
 #include <sch_sheet.h>
 #include <sch_sheet_path.h>
@@ -63,6 +67,12 @@
 #include <io/kicad/kicad_io_utils.h>
 #include <richio.h>
 #include <sch_io/kicad_sexpr/sch_io_kicad_sexpr.h>
+#include <sch_io/sch_io_mgr.h>
+#include <schematic_settings.h>
+#include <netlist_exporters/netlist_exporter_kicad.h>
+#include <reporter.h>
+#include <lib_id.h>
+#include <wx/ffile.h>
 #include <wx/tokenzr.h>
 #include <project.h>
 #include <wildcards_and_files_ext.h>
@@ -175,6 +185,18 @@ API_HANDLER_SCH::API_HANDLER_SCH( std::shared_ptr<SCH_CONTEXT> aContext,
             &API_HANDLER_SCH::handleGetCurrentVariant );
     registerHandler<ExpandTextVariables, ExpandTextVariablesResponse>(
             &API_HANDLER_SCH::handleExpandTextVariables );
+
+    // Since 11.0
+    registerHandler<Annotate, AnnotateResponse>( &API_HANDLER_SCH::handleAnnotate );
+    registerHandler<ClearAnnotation, AnnotateResponse>( &API_HANDLER_SCH::handleClearAnnotation );
+    registerHandler<SyncSchematicToBoard, SyncSchematicToBoardResponse>(
+            &API_HANDLER_SCH::handleSyncSchematicToBoard );
+    registerHandler<GetSchematicSettings, SchematicSettings>( &API_HANDLER_SCH::handleGetSchematicSettings );
+    registerHandler<SetSchematicSettings, SchematicSettings>( &API_HANDLER_SCH::handleSetSchematicSettings );
+    registerHandler<GetSymbolFieldsTable, SymbolFieldsTableResponse>(
+            &API_HANDLER_SCH::handleGetSymbolFieldsTable );
+    registerHandler<SetSymbolFields, SetSymbolFieldsResponse>( &API_HANDLER_SCH::handleSetSymbolFields );
+    registerHandler<AssignFootprints, AssignFootprintsResponse>( &API_HANDLER_SCH::handleAssignFootprints );
 }
 
 
@@ -1743,8 +1765,18 @@ HANDLER_RESULT<ItemRequestStatus> API_HANDLER_SCH::handleCreateUpdateItemsIntern
         {
             SCH_SHEET* sheet = static_cast<SCH_SHEET*>( item.get() );
 
+            // A new sheet gets the screen of the file it names: an existing file is loaded (or
+            // shared, if the hierarchy already uses it) and a missing one is created on disk
             if( aCreate && !sheet->GetScreen() )
-                sheet->SetScreen( new SCH_SCREEN( schematic() ) );
+            {
+                if( wxString error = attachSheetFile( sheet, targetPath ); !error.IsEmpty() )
+                {
+                    status.set_code( ItemStatusCode::ISC_INVALID_DATA );
+                    status.set_error_message( error.ToStdString() );
+                    aItemHandler( status, anyItem );
+                    continue;
+                }
+            }
 
             SCH_SHEET_PATH parentPath;
 
@@ -3309,4 +3341,1201 @@ API_HANDLER_SCH::handleGetCurrentVariant( const HANDLER_CONTEXT<GetCurrentVarian
         response.set_name( current.ToUTF8() );
 
     return response;
+}
+
+
+//// Annotation (Since 11.0) ////
+
+HANDLER_RESULT<bool> API_HANDLER_SCH::resolveAnnotateScope( const DocumentSpecifier& aDocument,
+                                                            kiapi::schematic::commands::AnnotateScope aScope,
+                                                            const google::protobuf::RepeatedPtrField<types::KIID>& aItems,
+                                                            bool aRecursive, SCH_SHEET_PATH& aCurrentSheet,
+                                                            SCH_SHEET_LIST& aSubSheets,
+                                                            SCH_SHEET_LIST& aSelectedSheets,
+                                                            std::unordered_set<SCH_SYMBOL*>& aSelectedSymbols )
+{
+    ApiResponseStatus e;
+    e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+
+    std::optional<SCH_SHEET_PATH> current = resolveSheet( aDocument );
+
+    if( !current || !current->LastScreen() )
+    {
+        e.set_error_message( "the schematic has no sheets" );
+        return tl::unexpected( e );
+    }
+
+    aCurrentSheet = *current;
+
+    SCH_SHEET_LIST sheets = schematic()->Hierarchy();
+
+    auto collectSubSheets =
+            [&]( SCH_SHEET* aSheet, SCH_SHEET_LIST& aOut )
+            {
+                SCH_SHEET_PATH subSheetPath = aCurrentSheet;
+                subSheetPath.push_back( aSheet );
+                sheets.GetSheetsWithinPath( aOut, subSheetPath );
+            };
+
+    switch( aScope )
+    {
+    case kiapi::schematic::commands::ANS_ALL:
+        break;
+
+    case kiapi::schematic::commands::ANS_SHEET:
+    {
+        if( !aRecursive )
+            break;
+
+        std::vector<SCH_ITEM*> subSheets;
+        aCurrentSheet.LastScreen()->GetSheets( &subSheets );
+
+        for( SCH_ITEM* item : subSheets )
+            collectSubSheets( static_cast<SCH_SHEET*>( item ), aSubSheets );
+
+        break;
+    }
+
+    case kiapi::schematic::commands::ANS_SELECTION:
+    {
+        if( aItems.empty() )
+        {
+            e.set_error_message( "ANS_SELECTION needs at least one symbol or sheet in items" );
+            return tl::unexpected( e );
+        }
+
+        for( const types::KIID& id : aItems )
+        {
+            SCH_ITEM* item = aCurrentSheet.ResolveItem( KIID( id.value() ) );
+
+            if( !item )
+            {
+                e.set_error_message( fmt::format( "item {} is not on the sheet {}", id.value(),
+                                                  aCurrentSheet.PathHumanReadable().ToStdString() ) );
+                return tl::unexpected( e );
+            }
+
+            if( item->Type() == SCH_SYMBOL_T )
+            {
+                aSelectedSymbols.insert( static_cast<SCH_SYMBOL*>( item ) );
+            }
+            else if( item->Type() == SCH_SHEET_T )
+            {
+                if( aRecursive )
+                    collectSubSheets( static_cast<SCH_SHEET*>( item ), aSelectedSheets );
+            }
+            else
+            {
+                e.set_error_message( fmt::format( "item {} is a {}, not a symbol or sheet", id.value(),
+                                                  item->GetClass().ToStdString() ) );
+                return tl::unexpected( e );
+            }
+        }
+
+        break;
+    }
+
+    default:
+        e.set_error_message( "scope must be ANS_ALL, ANS_SHEET or ANS_SELECTION" );
+        return tl::unexpected( e );
+    }
+
+    return true;
+}
+
+
+HANDLER_RESULT<AnnotateResponse> API_HANDLER_SCH::handleAnnotate( const HANDLER_CONTEXT<Annotate>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    const AnnotateOptions&          options = aCtx.Request.options();
+    const AnnotateScope             scope = aCtx.Request.scope();
+    SCH_SHEET_PATH                  currentSheet;
+    SCH_SHEET_LIST                  subSheets;
+    SCH_SHEET_LIST                  selectedSheets;
+    std::unordered_set<SCH_SYMBOL*> selectedSymbols;
+
+    HANDLER_RESULT<bool> resolved = resolveAnnotateScope( aCtx.Request.schematic(), scope, aCtx.Request.items(),
+                                                          options.recursive(), currentSheet, subSheets,
+                                                          selectedSheets, selectedSymbols );
+
+    if( !resolved )
+        return tl::unexpected( resolved.error() );
+
+    SCHEMATIC*          sch = schematic();
+    SCHEMATIC_SETTINGS& settings = sch->Settings();
+    SCH_SHEET_LIST      sheets = sch->Hierarchy();
+
+    // Unset options take the project's annotation settings, as the dialog's defaults do
+    ANNOTATE_ORDER_T sortOrder = static_cast<ANNOTATE_ORDER_T>( settings.m_AnnotateSortOrder );
+
+    switch( options.sort_order() )
+    {
+    case ASO_X_POSITION: sortOrder = SORT_BY_X_POSITION; break;
+    case ASO_Y_POSITION: sortOrder = SORT_BY_Y_POSITION; break;
+    case ASO_UNSORTED:   sortOrder = UNSORTED;           break;
+    default:                                              break;
+    }
+
+    ANNOTATE_ALGO_T algo = static_cast<ANNOTATE_ALGO_T>( settings.m_AnnotateMethod );
+
+    switch( options.numbering() )
+    {
+    case ANM_INCREMENTAL:        algo = INCREMENTAL_BY_REF;  break;
+    case ANM_SHEET_NUMBER_X100:  algo = SHEET_NUMBER_X_100;  break;
+    case ANM_SHEET_NUMBER_X1000: algo = SHEET_NUMBER_X_1000; break;
+    default:                                                 break;
+    }
+
+    int startNumber = options.start_number() > 0 ? static_cast<int>( options.start_number() )
+                                                 : settings.m_AnnotateStartNum;
+
+    // Symbols and sheets in scope, as SCH_EDIT_FRAME::AnnotateSymbols collects them
+    auto collectReferences =
+            [&]( SCH_REFERENCE_LIST& aReferences, SYMBOL_FILTER aCurrentSheetFilter )
+            {
+                switch( scope )
+                {
+                case ANS_ALL:
+                    sheets.GetSymbols( aReferences, SYMBOL_FILTER_ALL );
+                    break;
+
+                case ANS_SHEET:
+                    currentSheet.GetSymbols( aReferences, aCurrentSheetFilter );
+
+                    if( options.recursive() )
+                        subSheets.GetSymbolsWithinPath( aReferences, currentSheet, SYMBOL_FILTER_NON_POWER, true );
+
+                    break;
+
+                case ANS_SELECTION:
+                    for( SCH_SYMBOL* symbol : selectedSymbols )
+                        currentSheet.AppendSymbol( aReferences, symbol, SYMBOL_FILTER_NON_POWER, true );
+
+                    if( options.recursive() )
+                        selectedSheets.GetSymbolsWithinPath( aReferences, currentSheet, SYMBOL_FILTER_NON_POWER, true );
+
+                    break;
+
+                default:
+                    break;
+                }
+            };
+
+    // Multi-unit symbols keep their current groupings unless the caller asks to regroup them
+    SCH_MULTI_UNIT_REFERENCE_MAP lockedSymbols;
+
+    if( !options.regroup_units() )
+    {
+        switch( scope )
+        {
+        case ANS_ALL:
+            sheets.GetMultiUnitSymbols( lockedSymbols, SYMBOL_FILTER_ALL );
+            break;
+
+        case ANS_SHEET:
+            currentSheet.GetMultiUnitSymbols( lockedSymbols, SYMBOL_FILTER_ALL );
+
+            if( options.recursive() )
+                subSheets.GetMultiUnitSymbols( lockedSymbols, SYMBOL_FILTER_ALL );
+
+            break;
+
+        case ANS_SELECTION:
+            for( SCH_SYMBOL* symbol : selectedSymbols )
+                currentSheet.AppendMultiUnitSymbol( lockedSymbols, symbol, SYMBOL_FILTER_NON_POWER );
+
+            if( options.recursive() )
+                selectedSheets.GetMultiUnitSymbols( lockedSymbols, SYMBOL_FILTER_NON_POWER );
+
+            break;
+
+        default:
+            break;
+        }
+
+        // A reset drops groups that already hold the same unit twice so they get fresh numbers
+        if( options.reset_existing() )
+        {
+            std::erase_if( lockedSymbols,
+                           []( const auto& aEntry )
+                           {
+                               std::set<int> seenUnits;
+
+                               for( const SCH_REFERENCE& ref : aEntry.second )
+                               {
+                                   if( !seenUnits.insert( ref.GetUnit() ).second )
+                                       return true;
+                               }
+
+                               return false;
+                           } );
+        }
+    }
+
+    // The previous references, to report what changed
+    std::map<wxString, wxString> previousAnnotation;
+
+    {
+        SCH_REFERENCE_LIST all;
+        sheets.GetSymbols( all, SYMBOL_FILTER_ALL );
+
+        for( size_t i = 0; i < all.GetCount(); i++ )
+        {
+            SCH_SYMBOL*     symbol = all[i].GetSymbol();
+            SCH_SHEET_PATH* sheetPath = &all[i].GetSheetPath();
+            KIID_PATH       fullUuid = sheetPath->Path();
+
+            fullUuid.push_back( symbol->m_Uuid );
+
+            if( symbol->IsAnnotated( sheetPath ) )
+                previousAnnotation[fullUuid.AsString()] = symbol->GetRef( sheetPath, true );
+        }
+    }
+
+    sch->SetSheetNumberAndCount();
+
+    SCH_REFERENCE_LIST references;
+    collectReferences( references, SYMBOL_FILTER_ALL );
+
+    if( options.reset_existing() )
+        references.RemoveAnnotation();
+
+    // References outside the scope must not be reused
+    SCH_REFERENCE_LIST additionalRefs;
+
+    if( scope != ANS_ALL )
+    {
+        SCH_REFERENCE_LIST allRefs;
+        sheets.GetSymbols( allRefs, SYMBOL_FILTER_ALL );
+
+        for( size_t i = 0; i < allRefs.GetCount(); i++ )
+        {
+            if( !references.Contains( allRefs[i] ) )
+                additionalRefs.AddItem( allRefs[i] );
+        }
+    }
+
+    references.SetRefDesTracker( settings.m_refDesTracker );
+    references.SplitReferences();
+    references.AnnotateByOptions( sortOrder, algo, startNumber, lockedSymbols, additionalRefs, false );
+
+    SCH_COMMIT*      commit = static_cast<SCH_COMMIT*>( getCurrentCommit( aCtx.ClientName ) );
+    AnnotateResponse response;
+
+    for( size_t i = 0; i < references.GetCount(); i++ )
+    {
+        SCH_REFERENCE&  ref = references[i];
+        SCH_SYMBOL*     symbol = ref.GetSymbol();
+        SCH_SHEET_PATH* sheetPath = &ref.GetSheetPath();
+
+        commit->Modify( symbol, sheetPath->LastScreen() );
+        ref.Annotate();
+
+        KIID_PATH fullUuid = sheetPath->Path();
+        fullUuid.push_back( symbol->m_Uuid );
+
+        wxString prevRef = previousAnnotation[fullUuid.AsString()];
+        wxString newRef = symbol->GetRef( sheetPath, true );
+
+        if( newRef == prevRef )
+            continue;
+
+        response.set_annotated_count( response.annotated_count() + 1 );
+
+        wxString msg;
+
+        if( prevRef.Length() )
+        {
+            msg.Printf( _( "Updated %s from %s to %s." ), symbol->GetValue( true, sheetPath, false ), prevRef,
+                        newRef );
+        }
+        else
+        {
+            msg.Printf( _( "Annotated %s as %s." ), symbol->GetValue( true, sheetPath, false ), newRef );
+        }
+
+        response.add_messages( msg.ToUTF8() );
+    }
+
+    response.set_symbol_count( static_cast<uint32_t>( references.GetCount() ) );
+
+    // Final check, on a fresh list as SCH_EDIT_FRAME::CheckAnnotate does
+    SCH_REFERENCE_LIST checkList;
+    collectReferences( checkList, SYMBOL_FILTER_NON_POWER );
+
+    int errors = checkList.CheckAnnotation(
+            [&]( ERCE_T, const wxString& aMsg, SCH_REFERENCE*, SCH_REFERENCE* )
+            {
+                response.add_messages( aMsg.ToUTF8() );
+            } );
+
+    response.set_error_count( static_cast<uint32_t>( errors ) );
+
+    currentSheet.UpdateAllScreenReferences();
+    sch->SetSheetNumberAndCount();
+
+    if( !m_activeClients.contains( aCtx.ClientName ) )
+        pushCurrentCommit( aCtx.ClientName, _( "Annotate" ) );
+
+    if( m_frame )
+    {
+        frame()->SyncView();
+        frame()->GetCanvas()->Refresh();
+        frame()->UpdateNetHighlightStatus();
+    }
+
+    return response;
+}
+
+
+HANDLER_RESULT<AnnotateResponse>
+API_HANDLER_SCH::handleClearAnnotation( const HANDLER_CONTEXT<ClearAnnotation>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    SCH_SHEET_PATH                  currentSheet;
+    SCH_SHEET_LIST                  subSheets;
+    SCH_SHEET_LIST                  selectedSheets;
+    std::unordered_set<SCH_SYMBOL*> selectedSymbols;
+
+    HANDLER_RESULT<bool> resolved = resolveAnnotateScope( aCtx.Request.schematic(), aCtx.Request.scope(),
+                                                          aCtx.Request.items(), aCtx.Request.recursive(),
+                                                          currentSheet, subSheets, selectedSheets,
+                                                          selectedSymbols );
+
+    if( !resolved )
+        return tl::unexpected( resolved.error() );
+
+    SCH_COMMIT*      commit = static_cast<SCH_COMMIT*>( getCurrentCommit( aCtx.ClientName ) );
+    AnnotateResponse response;
+
+    auto clearSymbol =
+            [&]( SCH_SYMBOL* aSymbol, SCH_SCREEN* aScreen, SCH_SHEET_PATH* aSheet )
+            {
+                if( !aSymbol->IsAnnotated( aSheet ) )
+                    return;
+
+                commit->Modify( aSymbol, aScreen );
+
+                wxString msg;
+                msg.Printf( _( "Cleared annotation for %s." ), aSymbol->GetValue( true, aSheet, false ) );
+
+                aSymbol->ClearAnnotation( aSheet, false );
+                response.set_annotated_count( response.annotated_count() + 1 );
+                response.add_messages( msg.ToUTF8() );
+            };
+
+    auto clearSheet =
+            [&]( SCH_SHEET_PATH& aSheet )
+            {
+                for( SCH_ITEM* item : aSheet.LastScreen()->Items().OfType( SCH_SYMBOL_T ) )
+                {
+                    response.set_symbol_count( response.symbol_count() + 1 );
+                    clearSymbol( static_cast<SCH_SYMBOL*>( item ), aSheet.LastScreen(), &aSheet );
+                }
+            };
+
+    switch( aCtx.Request.scope() )
+    {
+    case ANS_ALL:
+        for( SCH_SHEET_PATH& sheet : schematic()->Hierarchy() )
+            clearSheet( sheet );
+
+        break;
+
+    case ANS_SHEET:
+        clearSheet( currentSheet );
+
+        for( SCH_SHEET_PATH& sheet : subSheets )
+            clearSheet( sheet );
+
+        break;
+
+    case ANS_SELECTION:
+        for( SCH_SYMBOL* symbol : selectedSymbols )
+        {
+            response.set_symbol_count( response.symbol_count() + 1 );
+            clearSymbol( symbol, currentSheet.LastScreen(), &currentSheet );
+        }
+
+        for( SCH_SHEET_PATH& sheet : selectedSheets )
+            clearSheet( sheet );
+
+        break;
+
+    default:
+        break;
+    }
+
+    currentSheet.UpdateAllScreenReferences();
+
+    if( !m_activeClients.contains( aCtx.ClientName ) )
+        pushCurrentCommit( aCtx.ClientName, _( "Delete Annotation" ) );
+
+    if( m_frame )
+    {
+        frame()->SyncView();
+        frame()->GetCanvas()->Refresh();
+        frame()->UpdateNetHighlightStatus();
+    }
+
+    return response;
+}
+
+
+//// Board synchronization (Since 11.0) ////
+
+HANDLER_RESULT<SyncSchematicToBoardResponse>
+API_HANDLER_SCH::handleSyncSchematicToBoard( const HANDLER_CONTEXT<SyncSchematicToBoard>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    ApiResponseStatus e;
+    e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+
+    if( aCtx.Request.board().type() != DocumentType::DOCTYPE_PCB )
+    {
+        e.set_error_message( "SyncSchematicToBoard.board must name a board" );
+        return tl::unexpected( e );
+    }
+
+    if( !Server() )
+    {
+        e.set_error_message( "SyncSchematicToBoard needs a running API server to reach the board" );
+        return tl::unexpected( e );
+    }
+
+    SCHEMATIC*     sch = schematic();
+    SCH_SHEET_LIST sheets = sch->Hierarchy();
+
+    // The netlist needs every symbol annotated, as SCH_EDIT_FRAME::ReadyToNetlist checks
+    sheets.AnnotatePowerSymbols();
+
+    SCH_REFERENCE_LIST references;
+    sheets.GetSymbols( references, SYMBOL_FILTER_NON_POWER );
+
+    std::vector<std::string> problems;
+
+    references.CheckAnnotation(
+            [&]( ERCE_T, const wxString& aMsg, SCH_REFERENCE*, SCH_REFERENCE* )
+            {
+                problems.push_back( aMsg.ToStdString() );
+            } );
+
+    if( !problems.empty() )
+    {
+        e.set_error_message( fmt::format( "the schematic must be fully annotated before it can be synchronized "
+                                          "to the board ({} problem(s)): {}",
+                                          problems.size(), fmt::join( problems, "; " ) ) );
+        return tl::unexpected( e );
+    }
+
+    // The exporter reads the connection graph; make sure it reflects every change
+    if( m_frame )
+    {
+        frame()->RecalculateConnections( nullptr, GLOBAL_CLEANUP );
+    }
+    else
+    {
+        SCH_COMMIT dummyCommit( toolManager() );
+        sch->RecalculateConnections( &dummyCommit, NO_CLEANUP, toolManager() );
+    }
+
+    NETLIST_EXPORTER_KICAD exporter( sch );
+    STRING_FORMATTER       formatter;
+
+    exporter.SetKiway( m_context->GetKiway() );
+    exporter.Format( &formatter, GNL_ALL | GNL_OPT_KICAD );
+
+    wxString netlistPath = wxFileName::CreateTempFileName( wxS( "kicad-api-netlist-" ) );
+
+    {
+        wxFFile file( netlistPath, wxS( "wb" ) );
+
+        if( !file.IsOpened() || !file.Write( formatter.GetString().c_str(), formatter.GetString().size() ) )
+        {
+            e.set_error_message( fmt::format( "could not write the netlist to '{}'", netlistPath.ToStdString() ) );
+            return tl::unexpected( e );
+        }
+    }
+
+    // Apply it through the board handler, exactly as an ImportNetlist request would
+    kiapi::board::commands::ImportNetlist import;
+    *import.mutable_board() = aCtx.Request.board();
+    import.set_netlist_path( netlistPath.ToUTF8() );
+    import.set_dry_run( aCtx.Request.dry_run() );
+    import.set_match_mode( aCtx.Request.match_mode() );
+    import.set_delete_extra_footprints( aCtx.Request.delete_extra_footprints() );
+    import.set_update_footprints( aCtx.Request.update_footprints() );
+    import.set_transfer_groups( aCtx.Request.transfer_groups() );
+    import.set_override_locks( aCtx.Request.override_locks() );
+    import.set_remove_extra_fields( aCtx.Request.remove_extra_fields() );
+
+    if( aCtx.Request.has_update_fields() )
+        import.set_update_fields( aCtx.Request.update_fields() );
+
+    ApiRequest request;
+    request.mutable_header()->set_client_name( aCtx.ClientName );
+    request.mutable_message()->PackFrom( import );
+
+    API_RESULT result = Server()->Dispatch( request );
+
+    wxRemoveFile( netlistPath );
+
+    ApiResponseStatus status;
+
+    if( result.has_value() )
+        status = result->status();
+    else
+        status = result.error();
+
+    if( status.status() == ApiStatusCode::AS_UNHANDLED )
+    {
+        e.set_error_message( fmt::format( "the board '{}' is not open in this KiCad; open it first",
+                                          aCtx.Request.board().board_filename() ) );
+        return tl::unexpected( e );
+    }
+    else if( status.status() != ApiStatusCode::AS_OK )
+    {
+        return tl::unexpected( status );
+    }
+
+    SyncSchematicToBoardResponse response;
+    response.set_netlist_path( netlistPath.ToUTF8() );
+
+    if( !result->message().UnpackTo( response.mutable_result() ) )
+    {
+        e.set_error_message( "the board handler answered ImportNetlist with an unexpected message" );
+        return tl::unexpected( e );
+    }
+
+    return response;
+}
+
+
+//// Schematic settings (Since 11.0) ////
+
+void API_HANDLER_SCH::packSchematicSettings( kiapi::schematic::commands::SchematicSettings& aOut ) const
+{
+    const SCHEMATIC_SETTINGS& s = schematic()->Settings();
+
+    PackDistance( *aOut.mutable_default_line_width(), s.m_DefaultLineWidth, schIUScale );
+    PackDistance( *aOut.mutable_default_text_size(), s.m_DefaultTextSize, schIUScale );
+    aOut.set_label_size_ratio( s.m_LabelSizeRatio );
+    aOut.set_text_offset_ratio( s.m_TextOffsetRatio );
+    PackDistance( *aOut.mutable_pin_symbol_size(), s.m_PinSymbolSize, schIUScale );
+
+    aOut.set_junction_size_choice( s.m_JunctionSizeChoice );
+    aOut.set_hop_over_size_choice( s.m_HopOverSizeChoice );
+    aOut.set_show_dnp_markers( s.m_ShowDNPMarkers );
+    PackDistance( *aOut.mutable_connection_grid_size(), s.m_ConnectionGridSize, schIUScale );
+
+    aOut.set_annotate_start_number( s.m_AnnotateStartNum );
+
+    switch( static_cast<ANNOTATE_ORDER_T>( s.m_AnnotateSortOrder ) )
+    {
+    case SORT_BY_X_POSITION: aOut.set_annotate_sort_order( ASO_X_POSITION ); break;
+    case SORT_BY_Y_POSITION: aOut.set_annotate_sort_order( ASO_Y_POSITION ); break;
+    case UNSORTED:           aOut.set_annotate_sort_order( ASO_UNSORTED );   break;
+    }
+
+    switch( static_cast<ANNOTATE_ALGO_T>( s.m_AnnotateMethod ) )
+    {
+    case INCREMENTAL_BY_REF:  aOut.set_annotate_numbering( ANM_INCREMENTAL );        break;
+    case SHEET_NUMBER_X_100:  aOut.set_annotate_numbering( ANM_SHEET_NUMBER_X100 );  break;
+    case SHEET_NUMBER_X_1000: aOut.set_annotate_numbering( ANM_SHEET_NUMBER_X1000 ); break;
+    }
+
+    aOut.set_intersheet_refs_show( s.m_IntersheetRefsShow );
+    aOut.set_intersheet_refs_list_own_page( s.m_IntersheetRefsListOwnPage );
+    aOut.set_intersheet_refs_format_short( s.m_IntersheetRefsFormatShort );
+    aOut.set_intersheet_refs_prefix( s.m_IntersheetRefsPrefix.ToUTF8() );
+    aOut.set_intersheet_refs_suffix( s.m_IntersheetRefsSuffix.ToUTF8() );
+
+    aOut.set_dashed_line_dash_ratio( s.m_DashedLineDashRatio );
+    aOut.set_dashed_line_gap_ratio( s.m_DashedLineGapRatio );
+
+    aOut.set_drawing_sheet_file( s.m_SchDrawingSheetFileName.ToUTF8() );
+    aOut.set_plot_directory( s.m_PlotDirectoryName.ToUTF8() );
+
+    aOut.set_subpart_id_separator( s.m_SubpartIdSeparator == 0
+                                           ? std::string()
+                                           : wxString( static_cast<wxChar>( s.m_SubpartIdSeparator ) ).ToStdString() );
+    aOut.set_subpart_first_id( wxString( static_cast<wxChar>( s.m_SubpartFirstId ) ).ToStdString() );
+}
+
+
+HANDLER_RESULT<kiapi::schematic::commands::SchematicSettings>
+API_HANDLER_SCH::handleGetSchematicSettings( const HANDLER_CONTEXT<GetSchematicSettings>& aCtx )
+{
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    kiapi::schematic::commands::SchematicSettings response;
+    packSchematicSettings( response );
+    return response;
+}
+
+
+HANDLER_RESULT<kiapi::schematic::commands::SchematicSettings>
+API_HANDLER_SCH::handleSetSchematicSettings( const HANDLER_CONTEXT<SetSchematicSettings>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    const kiapi::schematic::commands::SchematicSettings& in = aCtx.Request.settings();
+    SCHEMATIC_SETTINGS&                                   s = schematic()->Settings();
+
+    ApiResponseStatus e;
+    e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+
+    auto positive =
+            [&]( const types::Distance& aDistance, const char* aName ) -> std::optional<ApiResponseStatus>
+            {
+                if( aDistance.value_nm() <= 0 )
+                {
+                    e.set_error_message( fmt::format( "{} must be positive", aName ) );
+                    return e;
+                }
+
+                return std::nullopt;
+            };
+
+    if( in.has_default_line_width() )
+    {
+        if( auto err = positive( in.default_line_width(), "default_line_width" ) )
+            return tl::unexpected( *err );
+    }
+
+    if( in.has_default_text_size() )
+    {
+        if( auto err = positive( in.default_text_size(), "default_text_size" ) )
+            return tl::unexpected( *err );
+    }
+
+    if( in.has_pin_symbol_size() )
+    {
+        if( auto err = positive( in.pin_symbol_size(), "pin_symbol_size" ) )
+            return tl::unexpected( *err );
+    }
+
+    if( in.has_connection_grid_size() )
+    {
+        if( auto err = positive( in.connection_grid_size(), "connection_grid_size" ) )
+            return tl::unexpected( *err );
+    }
+
+    if( in.has_junction_size_choice() && in.junction_size_choice() > 5 )
+    {
+        e.set_error_message( "junction_size_choice must be 0 (none) to 5 (largest)" );
+        return tl::unexpected( e );
+    }
+
+    if( in.has_hop_over_size_choice() && in.hop_over_size_choice() > 5 )
+    {
+        e.set_error_message( "hop_over_size_choice must be 0 (none) to 5 (largest)" );
+        return tl::unexpected( e );
+    }
+
+    if( in.has_subpart_id_separator() && in.subpart_id_separator().size() > 1 )
+    {
+        e.set_error_message( "subpart_id_separator must be empty or a single character" );
+        return tl::unexpected( e );
+    }
+
+    if( in.has_subpart_first_id() && in.subpart_first_id() != "A" && in.subpart_first_id() != "1" )
+    {
+        e.set_error_message( "subpart_first_id must be \"A\" or \"1\"" );
+        return tl::unexpected( e );
+    }
+
+    if( in.has_annotate_sort_order() && in.annotate_sort_order() == ASO_UNKNOWN )
+    {
+        e.set_error_message( "annotate_sort_order must be a known sort order" );
+        return tl::unexpected( e );
+    }
+
+    if( in.has_annotate_numbering() && in.annotate_numbering() == ANM_UNKNOWN )
+    {
+        e.set_error_message( "annotate_numbering must be a known numbering method" );
+        return tl::unexpected( e );
+    }
+
+    if( in.has_default_line_width() )
+        s.m_DefaultLineWidth = UnpackDistance( in.default_line_width(), schIUScale );
+
+    if( in.has_default_text_size() )
+        s.m_DefaultTextSize = UnpackDistance( in.default_text_size(), schIUScale );
+
+    if( in.has_label_size_ratio() )
+        s.m_LabelSizeRatio = in.label_size_ratio();
+
+    if( in.has_text_offset_ratio() )
+        s.m_TextOffsetRatio = in.text_offset_ratio();
+
+    if( in.has_pin_symbol_size() )
+        s.m_PinSymbolSize = UnpackDistance( in.pin_symbol_size(), schIUScale );
+
+    if( in.has_junction_size_choice() )
+        s.m_JunctionSizeChoice = static_cast<int>( in.junction_size_choice() );
+
+    if( in.has_hop_over_size_choice() )
+        s.m_HopOverSizeChoice = static_cast<int>( in.hop_over_size_choice() );
+
+    if( in.has_show_dnp_markers() )
+        s.m_ShowDNPMarkers = in.show_dnp_markers();
+
+    if( in.has_connection_grid_size() )
+        s.m_ConnectionGridSize = UnpackDistance( in.connection_grid_size(), schIUScale );
+
+    if( in.has_annotate_start_number() )
+        s.m_AnnotateStartNum = static_cast<int>( in.annotate_start_number() );
+
+    if( in.has_annotate_sort_order() )
+    {
+        switch( in.annotate_sort_order() )
+        {
+        case ASO_X_POSITION: s.m_AnnotateSortOrder = SORT_BY_X_POSITION; break;
+        case ASO_Y_POSITION: s.m_AnnotateSortOrder = SORT_BY_Y_POSITION; break;
+        default:             s.m_AnnotateSortOrder = UNSORTED;           break;
+        }
+    }
+
+    if( in.has_annotate_numbering() )
+    {
+        switch( in.annotate_numbering() )
+        {
+        case ANM_SHEET_NUMBER_X100:  s.m_AnnotateMethod = SHEET_NUMBER_X_100;  break;
+        case ANM_SHEET_NUMBER_X1000: s.m_AnnotateMethod = SHEET_NUMBER_X_1000; break;
+        default:                     s.m_AnnotateMethod = INCREMENTAL_BY_REF;  break;
+        }
+    }
+
+    if( in.has_intersheet_refs_show() )
+        s.m_IntersheetRefsShow = in.intersheet_refs_show();
+
+    if( in.has_intersheet_refs_list_own_page() )
+        s.m_IntersheetRefsListOwnPage = in.intersheet_refs_list_own_page();
+
+    if( in.has_intersheet_refs_format_short() )
+        s.m_IntersheetRefsFormatShort = in.intersheet_refs_format_short();
+
+    if( in.has_intersheet_refs_prefix() )
+        s.m_IntersheetRefsPrefix = wxString::FromUTF8( in.intersheet_refs_prefix() );
+
+    if( in.has_intersheet_refs_suffix() )
+        s.m_IntersheetRefsSuffix = wxString::FromUTF8( in.intersheet_refs_suffix() );
+
+    if( in.has_dashed_line_dash_ratio() )
+        s.m_DashedLineDashRatio = in.dashed_line_dash_ratio();
+
+    if( in.has_dashed_line_gap_ratio() )
+        s.m_DashedLineGapRatio = in.dashed_line_gap_ratio();
+
+    if( in.has_drawing_sheet_file() )
+        setDrawingSheetFileName( wxString::FromUTF8( in.drawing_sheet_file() ) );
+
+    if( in.has_plot_directory() )
+        s.m_PlotDirectoryName = wxString::FromUTF8( in.plot_directory() );
+
+    if( in.has_subpart_id_separator() )
+        s.m_SubpartIdSeparator = in.subpart_id_separator().empty() ? 0 : in.subpart_id_separator()[0];
+
+    if( in.has_subpart_first_id() )
+        s.m_SubpartFirstId = in.subpart_first_id()[0];
+
+    // Sizes derived from the settings (junctions, hop-overs, label text) are drawn from them
+    if( m_frame && frame()->GetCanvas() )
+    {
+        frame()->GetCanvas()->GetView()->UpdateAllItems( KIGFX::ALL );
+        frame()->GetCanvas()->Refresh();
+    }
+
+    // Project settings are persisted with the schematic (SaveDocument); the document revision
+    // moves so that clients re-read them
+    bumpRevision();
+
+    kiapi::schematic::commands::SchematicSettings response;
+    packSchematicSettings( response );
+    return response;
+}
+
+
+//// Symbol fields table (Since 11.0) ////
+
+HANDLER_RESULT<SymbolFieldsTableResponse>
+API_HANDLER_SCH::handleGetSymbolFieldsTable( const HANDLER_CONTEXT<GetSymbolFieldsTable>& aCtx )
+{
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    SCHEMATIC*         sch = schematic();
+    wxString           variant = sch->GetCurrentVariant();
+    SCH_REFERENCE_LIST references;
+
+    sch->Hierarchy().GetSymbols( references, aCtx.Request.include_power_symbols() ? SYMBOL_FILTER_ALL
+                                                                                    : SYMBOL_FILTER_NON_POWER );
+    references.SortByReferenceOnly();
+
+    std::set<wxString> wanted;
+
+    for( const std::string& name : aCtx.Request.fields() )
+        wanted.insert( wxString::FromUTF8( name ) );
+
+    SymbolFieldsTableResponse response;
+
+    for( size_t i = 0; i < references.GetCount(); i++ )
+    {
+        SCH_SYMBOL*     symbol = references[i].GetSymbol();
+        SCH_SHEET_PATH& path = references[i].GetSheetPath();
+        SymbolFieldsRow* row = response.add_rows();
+
+        row->mutable_id()->set_value( symbol->m_Uuid.AsStdString() );
+        PackSheetPath( *row->mutable_sheet_path(), path.Path() );
+        row->set_reference( symbol->GetRef( &path, false ).ToUTF8() );
+        row->set_unit( static_cast<uint32_t>( symbol->GetUnitSelection( &path ) ) );
+        row->set_excluded_from_bom( symbol->GetExcludedFromBOM( &path, variant ) );
+        row->set_excluded_from_board( symbol->GetExcludedFromBoard( &path, variant ) );
+        row->set_do_not_populate( symbol->GetDNP( &path, variant ) );
+
+        for( const SCH_FIELD& field : symbol->GetFields() )
+        {
+            wxString name = field.GetName();
+
+            if( !wanted.empty() && !wanted.contains( name ) )
+                continue;
+
+            wxString value;
+
+            switch( field.GetId() )
+            {
+            case FIELD_T::REFERENCE: value = symbol->GetRef( &path, false );                       break;
+            case FIELD_T::VALUE:     value = symbol->GetValue( false, &path, false, variant );         break;
+            case FIELD_T::FOOTPRINT: value = symbol->GetFootprintFieldText( false, &path, false, variant ); break;
+            default:                 value = field.GetText();                                         break;
+            }
+
+            ( *row->mutable_fields() )[name.ToStdString()] = value.ToStdString();
+        }
+    }
+
+    return response;
+}
+
+
+HANDLER_RESULT<SetSymbolFieldsResponse>
+API_HANDLER_SCH::handleSetSymbolFields( const HANDLER_CONTEXT<SetSymbolFields>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    SCHEMATIC*     sch = schematic();
+    SCH_SHEET_LIST hierarchy = sch->Hierarchy();
+    wxString       variant = sch->GetCurrentVariant();
+    SCH_COMMIT*    commit = static_cast<SCH_COMMIT*>( getCurrentCommit( aCtx.ClientName ) );
+
+    SetSymbolFieldsResponse    response;
+    std::set<SCH_SHEET_PATH>   touchedPaths;
+
+    for( const SymbolFieldUpdate& update : aCtx.Request.updates() )
+    {
+        auto fail =
+                [&]( const std::string& aMessage )
+                {
+                    response.add_errors( fmt::format( "{}: {}", update.id().value(), aMessage ) );
+                };
+
+        SCH_SHEET_PATH           path;
+        std::optional<SCH_ITEM*> item = getItemById( KIID( update.id().value() ), &path );
+
+        if( !item || ( *item )->Type() != SCH_SYMBOL_T )
+        {
+            fail( "no such symbol" );
+            continue;
+        }
+
+        SCH_SYMBOL* symbol = static_cast<SCH_SYMBOL*>( *item );
+
+        if( update.has_sheet_path() )
+        {
+            std::optional<SCH_SHEET_PATH> requested =
+                    hierarchy.GetSheetPathByKIIDPath( UnpackSheetPath( update.sheet_path() ) );
+
+            if( !requested || requested->LastScreen() != path.LastScreen() )
+            {
+                fail( "the symbol is not placed on the given sheet path" );
+                continue;
+            }
+
+            path = *requested;
+        }
+
+        wxString name = wxString::FromUTF8( update.field() );
+        wxString value = wxString::FromUTF8( update.value() );
+
+        if( name.IsEmpty() )
+        {
+            fail( "a field name is required" );
+            continue;
+        }
+
+        SCH_FIELD* field = FindField( symbol->GetFields(), name );
+
+        if( update.remove() )
+        {
+            if( !field )
+            {
+                fail( fmt::format( "no field named '{}'", update.field() ) );
+                continue;
+            }
+
+            if( field->IsMandatory() )
+            {
+                fail( fmt::format( "the {} field cannot be removed", update.field() ) );
+                continue;
+            }
+
+            commit->Modify( symbol, path.LastScreen() );
+            symbol->RemoveField( field );
+        }
+        else if( field && field->GetId() == FIELD_T::REFERENCE )
+        {
+            if( value.IsEmpty() )
+            {
+                fail( "a reference cannot be empty" );
+                continue;
+            }
+
+            commit->Modify( symbol, path.LastScreen() );
+            symbol->SetRef( &path, value );
+        }
+        else if( field && field->GetId() == FIELD_T::VALUE )
+        {
+            commit->Modify( symbol, path.LastScreen() );
+            symbol->SetValueFieldText( value, &path, variant );
+        }
+        else if( field && field->GetId() == FIELD_T::FOOTPRINT )
+        {
+            commit->Modify( symbol, path.LastScreen() );
+            symbol->SetFootprintFieldText( value );
+        }
+        else if( field )
+        {
+            commit->Modify( symbol, path.LastScreen() );
+            field->SetText( value );
+        }
+        else
+        {
+            commit->Modify( symbol, path.LastScreen() );
+
+            SCH_FIELD newField( symbol, FIELD_T::USER, name );
+            newField.SetText( value );
+            newField.SetVisible( false );
+            newField.SetTextPos( symbol->GetPosition() );
+            symbol->AddField( newField );
+        }
+
+        touchedPaths.insert( path );
+        response.set_updated_count( response.updated_count() + 1 );
+    }
+
+    for( const SCH_SHEET_PATH& path : touchedPaths )
+        path.UpdateAllScreenReferences();
+
+    if( !m_activeClients.contains( aCtx.ClientName ) )
+        pushCurrentCommit( aCtx.ClientName, _( "Edit Symbol Fields" ) );
+
+    if( m_frame )
+    {
+        frame()->SyncView();
+        frame()->GetCanvas()->Refresh();
+    }
+
+    return response;
+}
+
+
+//// Footprint assignment (Since 11.0) ////
+
+HANDLER_RESULT<AssignFootprintsResponse>
+API_HANDLER_SCH::handleAssignFootprints( const HANDLER_CONTEXT<AssignFootprints>& aCtx )
+{
+    if( std::optional<ApiResponseStatus> busy = checkForBusy() )
+        return tl::unexpected( *busy );
+
+    if( HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() ); !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+
+    SCH_REFERENCE_LIST references;
+    schematic()->Hierarchy().GetSymbols( references, SYMBOL_FILTER_NON_POWER );
+
+    SCH_COMMIT*              commit = static_cast<SCH_COMMIT*>( getCurrentCommit( aCtx.ClientName ) );
+    AssignFootprintsResponse response;
+    std::set<SCH_SYMBOL*>    assigned;
+
+    for( const FootprintAssignment& assignment : aCtx.Request.assignments() )
+    {
+        wxString reference = wxString::FromUTF8( assignment.reference() );
+        wxString footprint;
+
+        if( !assignment.footprint().library_nickname().empty() || !assignment.footprint().entry_name().empty() )
+        {
+            LIB_ID id( wxString::FromUTF8( assignment.footprint().library_nickname() ),
+                       wxString::FromUTF8( assignment.footprint().entry_name() ) );
+            footprint = id.Format();
+        }
+
+        bool matched = false;
+
+        // Every unit of a multi-unit symbol shares the reference; CvPcb updates them all
+        for( size_t i = 0; i < references.GetCount(); i++ )
+        {
+            if( references[i].GetRef() != reference )
+                continue;
+
+            matched = true;
+
+            SCH_SYMBOL* symbol = references[i].GetSymbol();
+            SCH_FIELD*  field = symbol->GetField( FIELD_T::FOOTPRINT );
+            wxString    oldFootprint = references[i].GetFootprint();
+
+            if( oldFootprint == footprint && !( oldFootprint.IsEmpty() && field->IsVisible() ) )
+                continue;
+
+            commit->Modify( symbol, references[i].GetSheetPath().LastScreen(), RECURSE_MODE::NO_RECURSE );
+
+            if( oldFootprint.IsEmpty() && field->IsVisible() )
+                field->SetVisible( false );
+
+            field->SetText( footprint );
+            assigned.insert( symbol );
+        }
+
+        if( !matched )
+            response.add_unmatched_references( assignment.reference() );
+    }
+
+    response.set_assigned_count( static_cast<uint32_t>( assigned.size() ) );
+
+    if( !m_activeClients.contains( aCtx.ClientName ) )
+        pushCurrentCommit( aCtx.ClientName, _( "Assign Footprints" ) );
+
+    if( m_frame )
+        frame()->SyncView();
+
+    return response;
+}
+
+
+//// Sheet files (Since 11.0) ////
+
+wxString API_HANDLER_SCH::attachSheetFile( SCH_SHEET* aSheet, const SCH_SHEET_PATH& aParentPath )
+{
+    wxString fileName = aSheet->GetFileName();
+
+    if( fileName.IsEmpty() )
+        return wxS( "a new sheet needs a file name (the Sheetfile field)" );
+
+    SCH_SCREEN* parentScreen = aParentPath.LastScreen();
+    wxFileName  parentFile( parentScreen ? parentScreen->GetFileName() : wxString() );
+    wxString    baseDir = parentFile.GetPath().IsEmpty() ? project().GetProjectPath() : parentFile.GetPath();
+
+    // Sheet file names are relative to the parent sheet's file, as in the sheet dialog
+    wxFileName fn( ExpandTextVars( fileName, &project() ) );
+
+    if( !fn.Normalize( FN_NORMALIZE_FLAGS | wxPATH_NORM_ENV_VARS, baseDir ) )
+        return wxString::Format( wxS( "cannot resolve sheet file '%s' against '%s'" ), fileName, baseDir );
+
+    wxString absolute = fn.GetFullPath();
+    absolute.Replace( wxT( "\\" ), wxT( "/" ) );
+
+    // A file the hierarchy already uses is shared, as the dialog shares it
+    SCH_SCREEN* existing = nullptr;
+
+    if( schematic()->Root().SearchHierarchy( absolute, &existing ) && existing )
+    {
+        aSheet->SetScreen( existing );
+        return wxEmptyString;
+    }
+
+    if( wxFileExists( absolute ) )
+    {
+        SCH_IO_MGR::SCH_FILE_T type = SCH_IO_MGR::GuessPluginTypeFromSchPath( absolute );
+
+        if( type == SCH_IO_MGR::SCH_FILE_UNKNOWN )
+            type = SCH_IO_MGR::SCH_KICAD;
+
+        IO_RELEASER<SCH_IO>          pi( SCH_IO_MGR::FindPlugin( type ) );
+        std::map<std::string, UTF8>  props;
+
+        props["hierarchical_sheet_load"] = "1";
+
+        // Loaded into a stand-in with the new sheet's UUID so that sub-sheet paths come out right
+        std::unique_ptr<SCH_SHEET> loaded = std::make_unique<SCH_SHEET>( schematic() );
+        const_cast<KIID&>( loaded->m_Uuid ) = aSheet->m_Uuid;
+        loaded->SetFileName( absolute );
+
+        try
+        {
+            pi->LoadSchematicFile( absolute, schematic(), loaded.get(), &props );
+        }
+        catch( const IO_ERROR& ioe )
+        {
+            return wxString::Format( wxS( "could not load sheet file '%s': %s" ), absolute, ioe.What() );
+        }
+
+        if( !loaded->GetScreen() )
+            return wxString::Format( wxS( "sheet file '%s' has no content" ), absolute );
+
+        SCH_SHEET_LIST loadedSheets( loaded.get() );
+
+        if( parentScreen && schematic()->Hierarchy().TestForRecursion( loadedSheets, parentScreen->GetFileName() ) )
+            return wxString::Format( wxS( "sheet file '%s' would create a recursive hierarchy" ), absolute );
+
+        loaded->GetScreen()->MigrateSimModels();
+        loadedSheets.AddNewSymbolInstances( aParentPath, project().GetProjectName() );
+        loadedSheets.AddNewSheetInstances( aParentPath, schematic()->Hierarchy().GetLastVirtualPageNumber() );
+
+        // The stand-in gives its screen up; the sheet takes it over (and its reference)
+        SCH_SCREEN* screen = loaded->GetScreen();
+        aSheet->SetScreen( screen );
+        loaded->SetScreen( nullptr );
+
+        return wxEmptyString;
+    }
+
+    // A new file: an empty sheet with the parent's page settings, written now so that the
+    // hierarchy on disk matches what GetSchematicHierarchy reports
+    SCH_SCREEN* screen = new SCH_SCREEN( schematic() );
+    screen->SetFileName( absolute );
+    screen->SetContentModified();
+
+    if( parentScreen )
+        screen->SetPageSettings( parentScreen->GetPageSettings() );
+
+    aSheet->SetScreen( screen );
+
+    if( !SCH_API_SAVE::SaveSheetToFile( aSheet, *schematic(), absolute ) )
+        return wxString::Format( wxS( "could not create sheet file '%s'" ), absolute );
+
+    return wxEmptyString;
 }

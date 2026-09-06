@@ -2032,7 +2032,8 @@ HANDLER_RESULT<ImportNetlistResponse> API_HANDLER_PCB::handleImportNetlist( cons
     updater->SetReplaceFootprints( aCtx.Request.update_footprints() );
     updater->SetTransferGroups( aCtx.Request.transfer_groups() );
     updater->SetOverrideLocks( aCtx.Request.override_locks() );
-    updater->SetUpdateFields( true );
+    updater->SetUpdateFields( !aCtx.Request.has_update_fields() || aCtx.Request.update_fields() );
+    updater->SetRemoveExtraFields( aCtx.Request.remove_extra_fields() );
 
     const bool success = updater->UpdateNetlist( netlist );
 
