@@ -32,6 +32,8 @@
 #include <pcbnew_utils/board_test_utils.h>
 
 #include <api/api_handler_common.h>
+#include <api/api_job_registry.h>
+#include <progress_reporter.h>
 #include <api/api_handler_pcb.h>
 #include <api/api_server.h>
 #include <api/headless_pcb_context.h>
@@ -319,6 +321,73 @@ BOOST_AUTO_TEST_CASE( DispatchReportsHandlerExceptions )
     BOOST_CHECK( result.error().error_message().find( "kiface missing" ) != std::string::npos );
 
     m_server.DeregisterHandler( &throwing );
+}
+
+
+// Since 11.0: the job registry runs synchronous jobs in place and asynchronous ones on its
+// worker, and answers GetJobStatus for both
+BOOST_AUTO_TEST_CASE( JobRegistryRunsSyncAndAsyncJobs )
+{
+    API_JOB_REGISTRY& registry = API_JOB_REGISTRY::Instance();
+
+    auto makeExecutor = []( const std::string& aOutput )
+    {
+        return [aOutput]( PROGRESS_REPORTER& aProgress ) -> kiapi::common::types::RunJobResponse
+        {
+            aProgress.Report( wxS( "working" ) );
+            aProgress.SetCurrentProgress( 0.5 );
+
+            kiapi::common::types::RunJobResponse result;
+            result.set_status( kiapi::common::types::JS_SUCCESS );
+            result.add_output_path( aOutput );
+            return result;
+        };
+    };
+
+    // Synchronous: the result comes back directly, with a job id that GetJobStatus knows
+    kiapi::common::types::RunJobResponse sync = registry.Run( nullptr, makeExecutor( "sync.out" ), false );
+    BOOST_CHECK_EQUAL( sync.status(), kiapi::common::types::JS_SUCCESS );
+    BOOST_REQUIRE( !sync.job_id().empty() );
+    BOOST_REQUIRE_EQUAL( sync.output_path_size(), 1 );
+
+    std::optional<kiapi::common::commands::GetJobStatusResponse> status = registry.Status( sync.job_id() );
+    BOOST_REQUIRE( status.has_value() );
+    BOOST_CHECK_EQUAL( status->state(), kiapi::common::commands::JOB_STATE_FINISHED );
+    BOOST_CHECK_EQUAL( status->percent(), 100 );
+    BOOST_CHECK_EQUAL( status->result().output_path( 0 ), "sync.out" );
+
+    // Asynchronous: JS_RUNNING at once, finished after the worker ran it
+    kiapi::common::types::RunJobResponse async = registry.Run( nullptr, makeExecutor( "async.out" ), true );
+    BOOST_CHECK_EQUAL( async.status(), kiapi::common::types::JS_RUNNING );
+    BOOST_REQUIRE( !async.job_id().empty() );
+    BOOST_CHECK_NE( async.job_id(), sync.job_id() );
+
+    registry.WaitForIdle();
+    BOOST_CHECK( !registry.Busy() );
+
+    status = registry.Status( async.job_id() );
+    BOOST_REQUIRE( status.has_value() );
+    BOOST_CHECK_EQUAL( status->state(), kiapi::common::commands::JOB_STATE_FINISHED );
+    BOOST_CHECK_EQUAL( status->result().status(), kiapi::common::types::JS_SUCCESS );
+    BOOST_CHECK_EQUAL( status->result().job_id(), async.job_id() );
+    BOOST_CHECK_EQUAL( status->result().output_path( 0 ), "async.out" );
+
+    // An executor that throws is a failed job, not a dead worker
+    kiapi::common::types::RunJobResponse throwing = registry.Run(
+            nullptr,
+            []( PROGRESS_REPORTER& ) -> kiapi::common::types::RunJobResponse
+            {
+                throw std::runtime_error( "boom" );
+            },
+            true );
+
+    registry.WaitForIdle();
+    status = registry.Status( throwing.job_id() );
+    BOOST_REQUIRE( status.has_value() );
+    BOOST_CHECK_EQUAL( status->result().status(), kiapi::common::types::JS_ERROR );
+    BOOST_CHECK( status->result().message().find( "boom" ) != std::string::npos );
+
+    BOOST_CHECK( !registry.Status( "no-such-job" ).has_value() );
 }
 
 

@@ -26,6 +26,7 @@
 #include <confirm.h>
 #include <api/api_handler_footprint.h>
 #include <api/api_handler_pcb.h>
+#include <api/api_job_registry.h>
 #include <api/api_server.h>
 #include <api/api_utils.h>
 #include <api/cross_probe_client.h>
@@ -867,6 +868,8 @@ void IFACE::closeCurrentDocument( KICAD_API_SERVER* aServer )
 
     // The jobs handler caches the last-loaded board. Clear it so the next job
     // uses the board from the newly opened document rather than a stale copy.
+    // An asynchronous API job may still be reading it.
+    API_JOB_REGISTRY::Instance().WaitForIdle();
     m_jobHandler->ClearCachedBoard();
 }
 

@@ -29,6 +29,20 @@ enum JobStatus
     JS_SUCCESS = 1;
     JS_WARNING = 2;
     JS_ERROR = 3;
+
+    // The job was started asynchronously and has not finished; poll GetJobStatus with job_id
+    // Since: 11.0
+    JS_RUNNING = 4;
+}
+
+// A job output returned inline; see RunJobSettings.return_inline
+// Since: 11.0
+message JobOutputData
+{
+    // The output's path, as also listed in RunJobResponse.output_path
+    string path = 1;
+
+    bytes data = 2;
 }
 
 message RunJobResponse
@@ -41,6 +55,14 @@ message RunJobResponse
 
     // Optional message containing warning or error details. Should be empty if status is JS_SUCCESS.
     string message = 3;
+
+    // Identifier of the job, for GetJobStatus and JobProgress events
+    // Since: 11.0
+    string job_id = 4;
+
+    // The outputs' contents, when RunJobSettings.return_inline was set and the job finished
+    // Since: 11.0
+    repeated JobOutputData inline_outputs = 5;
 }
 
 message RunJobSettings
@@ -51,4 +73,15 @@ message RunJobSettings
     // The path where the job's output should be saved
     // May be a file or a directory depending on the context of the job
     string output_path = 2;
+
+    // Return as soon as the job is queued, with status JS_RUNNING and job_id set.  Progress is
+    // published as JobProgress events and the result is available from GetJobStatus.  Honored by
+    // kicad-cli api-server; an editor window runs the job synchronously regardless.
+    // Since: 11.0
+    bool async = 3;
+
+    // Also return the output files' contents in RunJobResponse.inline_outputs (files up to
+    // 16 MiB each; directory outputs contribute the files directly inside them)
+    // Since: 11.0
+    bool return_inline = 4;
 }

@@ -365,6 +365,7 @@ set( KICOMMON_SRCS
     api/api_handler.cpp
     api/api_plugin.cpp
     api/api_plugin_manager.cpp
+    api/api_job_registry.cpp
     api/api_server.cpp
     api/api_utils.cpp
     api/cross_probe_client.cpp
@@ -936,6 +937,7 @@ endif()
 list( APPEND COMMON_SRCS
     api/api_handler_common.cpp
     api/api_handler_editor.cpp
+    api/api_jobs.cpp
 )
 
 add_library( common STATIC

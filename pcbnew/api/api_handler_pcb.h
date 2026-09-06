@@ -32,6 +32,7 @@
 using namespace kiapi::board::jobs;
 
 
+class JOB;
 class PCB_EDIT_FRAME;
 class PCB_TRACK;
 class PROPERTY_BASE;
@@ -157,6 +158,13 @@ private:
     void collectDrcMarkers( DrcResultsResponse& aResponse ) const;
 
     DrcSeveritiesResponse drcSeverities() const;
+
+    /**
+     * Run an export job through the API job registry: synchronously, or (headless, when
+     * aSettings.async is set) on the job worker thread.  Since 11.0.
+     */
+    HANDLER_RESULT<types::RunJobResponse> runBoardJob( const types::RunJobSettings& aSettings,
+                                                       std::unique_ptr<JOB> aJob );
 
     HANDLER_RESULT<types::RunJobResponse> handleRunBoardJobExport3D(
             const HANDLER_CONTEXT<RunBoardJobExport3D>& aCtx );

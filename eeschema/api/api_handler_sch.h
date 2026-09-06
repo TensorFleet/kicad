@@ -37,6 +37,7 @@ using namespace kiapi::common;
 
 using google::protobuf::Empty;
 
+class JOB;
 class SCH_EDIT_FRAME;
 class SCH_ITEM;
 class SCH_SHEET;
@@ -151,6 +152,10 @@ private:
 
     HANDLER_RESULT<commands::SelectionResponse>
     handleRemoveFromSelection( const HANDLER_CONTEXT<commands::RemoveFromSelection>& aCtx );
+
+    /// See API_HANDLER_PCB::runBoardJob.  Since 11.0.
+    HANDLER_RESULT<types::RunJobResponse> runSchematicJob( const types::RunJobSettings& aSettings,
+                                                           std::unique_ptr<JOB> aJob );
 
     HANDLER_RESULT<types::RunJobResponse>
     handleRunSchematicJobExportSvg( const HANDLER_CONTEXT<kiapi::schematic::jobs::RunSchematicJobExportSvg>& aCtx );

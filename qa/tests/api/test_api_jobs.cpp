@@ -28,6 +28,8 @@
 #include "api_e2e_utils.h"
 
 #include <api/board/board_jobs.pb.h>
+#include <api/common/commands/base_commands.pb.h>
+#include <wx/utils.h>
 #include <api/board/board_types.pb.h>
 #include <api/schematic/schematic_jobs.pb.h>
 
@@ -416,6 +418,91 @@ BOOST_FIXTURE_TEST_CASE( ExportSchematicBom, API_SERVER_E2E_FIXTURE )
 
     if( wxFileName::FileExists( outputPath.GetFullPath() ) )
         wxRemoveFile( outputPath.GetFullPath() );
+}
+
+
+// Since 11.0: RunJobSettings.async queues the job and answers JS_RUNNING with a job id;
+// GetJobStatus reports it finished with the result, and return_inline carries the output bytes.
+BOOST_FIXTURE_TEST_CASE( ExportBoardSvgAsyncWithInlineOutput, API_SERVER_E2E_FIXTURE )
+{
+    BOOST_REQUIRE_MESSAGE( Start(), LastError() );
+
+    wxString testDataDir =
+            wxString::FromUTF8( KI_TEST::GetTestDataRootDir() ) + wxS( "cli/artwork_generation_regressions/" );
+
+    wxFileName boardPath( testDataDir, wxS( "ZoneFill-4.0.7.kicad_pcb" ) );
+
+    kiapi::common::types::DocumentSpecifier document;
+
+    BOOST_REQUIRE_MESSAGE( Client().OpenDocument( boardPath.GetFullPath(), &document ),
+                           "OpenDocument failed: " + Client().LastError() );
+
+    wxString   tempFile = wxFileName::CreateTempFileName( wxS( "api_job_async_svg_" ) );
+    wxFileName outputPath( tempFile );
+    outputPath.SetExt( wxS( "svg" ) );
+
+    kiapi::board::jobs::RunBoardJobExportSvg request;
+    *request.mutable_job_settings()->mutable_document() = document;
+    request.mutable_job_settings()->set_output_path( outputPath.GetFullPath().ToUTF8().data() );
+    request.mutable_job_settings()->set_async( true );
+    request.mutable_job_settings()->set_return_inline( true );
+    request.mutable_plot_settings()->add_layers( kiapi::board::types::BL_F_Cu );
+    request.set_page_mode( kiapi::board::jobs::BJPM_ALL_LAYERS_ONE_PAGE );
+
+    kiapi::common::types::RunJobResponse started;
+    BOOST_REQUIRE_MESSAGE( Client().RunJob( request, &started ), "RunJob failed: " + Client().LastError() );
+    BOOST_CHECK_EQUAL( started.status(), kiapi::common::types::JS_RUNNING );
+    BOOST_REQUIRE( !started.job_id().empty() );
+
+    kiapi::common::commands::GetJobStatus     statusRequest;
+    kiapi::common::commands::GetJobStatusResponse status;
+    statusRequest.set_job_id( started.job_id() );
+
+    // The export takes well under a second; give a loaded machine much longer
+    for( int attempt = 0; attempt < 600; ++attempt )
+    {
+        kiapi::common::ApiResponse response;
+        BOOST_REQUIRE( Client().SendCommand( statusRequest, &response ) );
+        BOOST_REQUIRE_MESSAGE( response.status().status() == kiapi::common::AS_OK, response.status().error_message() );
+        BOOST_REQUIRE( response.message().UnpackTo( &status ) );
+
+        if( status.state() == kiapi::common::commands::JOB_STATE_FINISHED )
+            break;
+
+        wxMilliSleep( 50 );
+    }
+
+    BOOST_REQUIRE_EQUAL( status.state(), kiapi::common::commands::JOB_STATE_FINISHED );
+    BOOST_CHECK_EQUAL( status.percent(), 100 );
+    BOOST_CHECK_EQUAL( status.job_id(), started.job_id() );
+    BOOST_REQUIRE_MESSAGE( status.result().status() == kiapi::common::types::JS_SUCCESS,
+                           "Job failed: " + wxString::FromUTF8( status.result().message() ) );
+    BOOST_REQUIRE_GT( status.result().output_path_size(), 0 );
+    BOOST_REQUIRE_EQUAL( status.result().inline_outputs_size(), 1 );
+
+    const std::string& svg = status.result().inline_outputs( 0 ).data();
+    BOOST_CHECK_EQUAL( status.result().inline_outputs( 0 ).path(), status.result().output_path( 0 ) );
+    BOOST_CHECK( svg.find( "<svg" ) != std::string::npos );
+    BOOST_CHECK_EQUAL( svg, readFile( wxString::FromUTF8( status.result().output_path( 0 ) ) ) );
+
+    // An unknown id is a bad request
+    statusRequest.set_job_id( "not-a-job" );
+    kiapi::common::ApiResponse response;
+    BOOST_REQUIRE( Client().SendCommand( statusRequest, &response ) );
+    BOOST_CHECK_EQUAL( response.status().status(), kiapi::common::AS_BAD_REQUEST );
+
+    for( const std::string& path : status.result().output_path() )
+    {
+        if( wxFileName::FileExists( wxString::FromUTF8( path ) ) )
+            wxRemoveFile( wxString::FromUTF8( path ) );
+    }
+
+    if( wxFileName::DirExists( outputPath.GetFullPath() ) )
+        wxFileName::Rmdir( outputPath.GetFullPath(), wxPATH_RMDIR_RECURSIVE );
+    else if( wxFileName::FileExists( outputPath.GetFullPath() ) )
+        wxRemoveFile( outputPath.GetFullPath() );
+
+    wxRemoveFile( tempFile );
 }
 
 
