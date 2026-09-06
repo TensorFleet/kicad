@@ -78,15 +78,28 @@ void testEnums( bool aPartiallyMapped = false )
     {
         BOOST_TEST_CONTEXT( magic_enum::enum_type_name<KiCadEnum>() << "::" << magic_enum::enum_name( value ) )
         {
-            ProtoEnum result;
+            ProtoEnum result = static_cast<ProtoEnum>( 0 );
 
             if( aPartiallyMapped )
             {
+                bool mapped = true;
+
                 try
                 {
                     result = ToProtoEnum<KiCadEnum, ProtoEnum>( value );
                 }
                 catch( KI_TEST::WX_ASSERT_ERROR )
+                {
+                    mapped = false;
+                }
+
+                // The mapping functions report an unmapped value through wxCHECK, which a wx
+                // built with wxDEBUG_LEVEL=0 compiles out; there the "unknown" zero comes back
+                // instead of the exception, and it means the same thing
+                if( result == static_cast<ProtoEnum>( 0 ) )
+                    mapped = false;
+
+                if( !mapped )
                 {
                     // If it wasn't mapped from KiCad to Proto, it shouldn't be mapped the other way
                     BOOST_REQUIRE_MESSAGE( !protoToKiCadSeen.right.count( value ),
