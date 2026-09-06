@@ -31,6 +31,7 @@ import "board/board.proto";
 import "board/board_rules.proto";
 import "board/board_types.proto";
 import "board/board_jobs.proto";
+import "common/types/jobs.proto";
 import "common/commands/editor_commands.proto";
 
 /*
@@ -633,7 +634,7 @@ message InteractiveMoveItems
 //// DRC ////
 
 // Runs the design rule checker on an open board, replacing the board's DRC markers with the
-// results, exactly as the "kicad-cli pcb drc" job does.  The check runs synchronously.
+// results, exactly as the "kicad-cli pcb drc" job does.
 // Returns DrcResultsResponse
 // Since 11.0
 message RunBoardJobDrc
@@ -653,6 +654,16 @@ message RunBoardJobDrc
   // Optional path to a KiCad netlist file to use for the parity checks instead of netlisting the
   // project's schematic
   string schematic_netlist_path = 5;
+
+  // Only RunJobSettings.async is honored: the check is queued on the same worker as the export
+  // jobs and DrcResultsResponse comes back at once with `job` set to JS_RUNNING and a job id.
+  // Progress is published as JobProgress events, GetJobStatus reports the outcome, and
+  // GetDrcMarkers then reads the markers.  Until the check finishes the board and schematic
+  // commands answer AS_BUSY, because the checker is rebuilding the document's markers.  The
+  // document, output path and return_inline fields have no meaning for a check and are ignored;
+  // an editor window runs the check synchronously regardless.
+  // Since 11.0
+  kiapi.common.types.RunJobSettings job_settings = 6;
 }
 
 // Since 11.0
@@ -671,6 +682,12 @@ message DrcResultsResponse
 
   // Of the markers above, how many are schematic parity markers
   uint32 parity_count = 6;
+
+  // Set only when the check was started asynchronously (RunJobSettings.async): status JS_RUNNING
+  // and the job id to poll with GetJobStatus.  Every other field is then empty; read the markers
+  // with GetDrcMarkers once the job reports JOB_STATE_FINISHED.
+  // Since 11.0
+  kiapi.common.types.RunJobResponse job = 7;
 }
 
 // Returns the DRC markers currently on the board without running the checker.

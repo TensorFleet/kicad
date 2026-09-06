@@ -124,12 +124,14 @@ API_JOB_REGISTRY::~API_JOB_REGISTRY()
 }
 
 
-RunJobResponse API_JOB_REGISTRY::Run( KICAD_API_SERVER* aServer, EXECUTOR aExecutor, bool aAsync )
+RunJobResponse API_JOB_REGISTRY::Run( KICAD_API_SERVER* aServer, EXECUTOR aExecutor, bool aAsync,
+                                      bool aExclusive )
 {
     std::shared_ptr<ENTRY> entry = std::make_shared<ENTRY>();
     entry->Id = KIID().AsStdString();
     entry->Server = aServer;
     entry->Executor = std::move( aExecutor );
+    entry->Exclusive = aExclusive;
     entry->Result.set_job_id( entry->Id );
 
     {
@@ -331,4 +333,21 @@ bool API_JOB_REGISTRY::Busy() const
 {
     std::lock_guard<std::mutex> lock( m_mutex );
     return !m_queue.empty() || m_running != nullptr;
+}
+
+
+std::optional<std::string> API_JOB_REGISTRY::ExclusiveJob() const
+{
+    std::lock_guard<std::mutex> lock( m_mutex );
+
+    if( m_running && m_running->Exclusive )
+        return m_running->Id;
+
+    for( const std::shared_ptr<ENTRY>& entry : m_queue )
+    {
+        if( entry->Exclusive )
+            return entry->Id;
+    }
+
+    return std::nullopt;
 }

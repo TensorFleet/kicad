@@ -18,9 +18,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <fmt/format.h>
+
 #include <api/api_handler_editor.h>
 
 #include <api/api_enums.h>
+#include <api/api_job_registry.h>
 #include <api/api_undo_stack.h>
 #include <api/api_utils.h>
 #include <eda_base_frame.h>
@@ -961,6 +964,18 @@ HANDLER_RESULT<std::optional<KIID>> API_HANDLER_EDITOR::validateItemHeaderDocume
 
 std::optional<ApiResponseStatus> API_HANDLER_EDITOR::checkForBusy()
 {
+    // An exclusive API job (a design rule check started with RunJobSettings.async) rewrites the
+    // open document's markers on the registry's worker thread, so nothing else may touch the
+    // document until it is done.  Since 11.0
+    if( std::optional<std::string> job = API_JOB_REGISTRY::Instance().ExclusiveJob() )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BUSY );
+        e.set_error_message( fmt::format( "job {} is running; poll GetJobStatus until it finishes",
+                                          *job ) );
+        return e;
+    }
+
     if( !m_frame )
         return std::nullopt;
 
