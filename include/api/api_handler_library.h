@@ -70,10 +70,10 @@ protected:
     HANDLER_RESULT<LIBRARY_TABLE*> table( kiapi::common::commands::LibraryTableScope aScope ) const;
 
     /// Save aTable and reload the manager's view of it; @return an error status on failure
-    std::optional<ApiResponseStatus> saveTable( LIBRARY_TABLE* aTable );
+    std::optional<ApiResponseStatus> saveTable( LIBRARY_TABLE* aTable, const std::string& aClientName );
 
     /// Publish a ProjectChanged{PCK_LIBRARY_TABLES} event, if the server is publishing
-    void notifyTablesChanged();
+    void notifyTablesChanged( const std::string& aClientName );
 
     static ApiResponseStatus badRequest( const std::string& aMessage );
 

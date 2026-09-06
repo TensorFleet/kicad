@@ -151,7 +151,8 @@ HANDLER_RESULT<LIBRARY_TABLE*> API_HANDLER_LIBRARY::table( LibraryTableScope aSc
 }
 
 
-std::optional<ApiResponseStatus> API_HANDLER_LIBRARY::saveTable( LIBRARY_TABLE* aTable )
+std::optional<ApiResponseStatus> API_HANDLER_LIBRARY::saveTable( LIBRARY_TABLE* aTable,
+                                                                 const std::string& aClientName )
 {
     std::optional<ApiResponseStatus> error;
 
@@ -166,12 +167,12 @@ std::optional<ApiResponseStatus> API_HANDLER_LIBRARY::saveTable( LIBRARY_TABLE* 
         return error;
 
     Pgm().GetLibraryManager().ReloadTables( aTable->Scope(), { m_type } );
-    notifyTablesChanged();
+    notifyTablesChanged( aClientName );
     return std::nullopt;
 }
 
 
-void API_HANDLER_LIBRARY::notifyTablesChanged()
+void API_HANDLER_LIBRARY::notifyTablesChanged( const std::string& aClientName )
 {
     if( !Server() || !m_project )
         return;
@@ -181,6 +182,7 @@ void API_HANDLER_LIBRARY::notifyTablesChanged()
     changed.mutable_project()->set_name( m_project->GetProjectName().ToUTF8() );
     changed.mutable_project()->set_path( m_project->GetProjectPath().ToUTF8() );
     changed.set_kind( kiapi::common::events::PCK_LIBRARY_TABLES );
+    changed.set_client_name( aClientName );
     publish( event );
 }
 
@@ -268,7 +270,7 @@ HANDLER_RESULT<LibraryTableRow> API_HANDLER_LIBRARY::handleCreateLibrary(
     // saveTable reloads the tables, which replaces the table object
     LIBRARY_TABLE_SCOPE scope = ( *table )->Scope();
 
-    if( std::optional<ApiResponseStatus> e = saveTable( *table ) )
+    if( std::optional<ApiResponseStatus> e = saveTable( *table, aCtx.ClientName ) )
         return tl::unexpected( *e );
 
     if( !m_adapter->CreateLibrary( nickname ) )
@@ -337,7 +339,7 @@ HANDLER_RESULT<LibraryTableRow> API_HANDLER_LIBRARY::handleAddLibraryTableRow(
     // saveTable reloads the tables, which replaces the table object
     LIBRARY_TABLE_SCOPE scope = ( *table )->Scope();
 
-    if( std::optional<ApiResponseStatus> e = saveTable( *table ) )
+    if( std::optional<ApiResponseStatus> e = saveTable( *table, aCtx.ClientName ) )
         return tl::unexpected( *e );
 
     LibraryTableRow response;
@@ -381,7 +383,7 @@ HANDLER_RESULT<google::protobuf::Empty> API_HANDLER_LIBRARY::handleRemoveLibrary
 
     rows.erase( it );
 
-    if( std::optional<ApiResponseStatus> e = saveTable( *table ) )
+    if( std::optional<ApiResponseStatus> e = saveTable( *table, aCtx.ClientName ) )
         return tl::unexpected( *e );
 
     return google::protobuf::Empty();
