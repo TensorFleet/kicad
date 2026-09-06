@@ -128,20 +128,11 @@ void API_HANDLER_EDITOR::advanceRevision( bool aComplete, const COMMIT* aCommit 
 
     if( aCommit )
     {
-        aCommit->ForEachEntry(
-                [&]( EDA_ITEM* aItem, CHANGE_TYPE aType )
-                {
-                    if( !aItem )
-                        return;
-
-                    switch( aType )
-                    {
-                    case CHT_ADD:
-                    case CHT_MODIFY: changes.Changed.push_back( aItem->m_Uuid ); break;
-                    case CHT_REMOVE: changes.Deleted.push_back( aItem->m_Uuid ); break;
-                    default:         break;
-                    }
-                } );
+        COMMIT_CHANGES commitChanges = classifyCommit( *aCommit );
+        changes.Changed = std::move( commitChanges.Created );
+        changes.Changed.insert( changes.Changed.end(), commitChanges.Updated.begin(),
+                                commitChanges.Updated.end() );
+        changes.Deleted = std::move( commitChanges.Deleted );
     }
 
     advanceRevision( std::move( changes ) );
@@ -788,25 +779,84 @@ void API_HANDLER_EDITOR::fillDocumentChanged( events::DocumentChanged& aEvent, c
 
     if( aCommit )
     {
-        aCommit->ForEachEntry(
-                [&]( EDA_ITEM* aItem, CHANGE_TYPE aType )
-                {
-                    if( !aItem )
-                        return;
+        COMMIT_CHANGES changes = classifyCommit( *aCommit );
 
-                    types::KIID* id = nullptr;
+        for( const KIID& id : changes.Created )
+            aEvent.add_created()->set_value( id.AsStdString() );
 
-                    switch( aType )
-                    {
-                    case CHT_ADD:    id = aEvent.add_created(); break;
-                    case CHT_MODIFY: id = aEvent.add_updated(); break;
-                    case CHT_REMOVE: id = aEvent.add_deleted(); break;
-                    default:         return;
-                    }
+        for( const KIID& id : changes.Updated )
+            aEvent.add_updated()->set_value( id.AsStdString() );
 
-                    id->set_value( aItem->m_Uuid.AsStdString() );
-                } );
+        for( const KIID& id : changes.Deleted )
+            aEvent.add_deleted()->set_value( id.AsStdString() );
     }
+}
+
+
+API_HANDLER_EDITOR::COMMIT_CHANGES API_HANDLER_EDITOR::classifyCommit( const COMMIT& aCommit )
+{
+    std::vector<KIID> added;
+    std::vector<KIID> modified;
+    std::vector<KIID> removed;
+
+    aCommit.ForEachEntry(
+            [&]( EDA_ITEM* aItem, CHANGE_TYPE aType )
+            {
+                if( !aItem )
+                    return;
+
+                switch( aType )
+                {
+                case CHT_ADD:    added.push_back( aItem->m_Uuid );    break;
+                case CHT_MODIFY: modified.push_back( aItem->m_Uuid ); break;
+                case CHT_REMOVE: removed.push_back( aItem->m_Uuid );  break;
+                default:                                              break;
+                }
+            } );
+
+    // An item replaced by a new one with the same id (footprints and groups are updated that
+    // way) is an update to the client, not a deletion and a creation
+    std::set<KIID> addedSet( added.begin(), added.end() );
+    std::set<KIID> removedSet( removed.begin(), removed.end() );
+
+    COMMIT_CHANGES changes;
+    changes.Updated = modified;
+
+    for( const KIID& id : added )
+    {
+        if( removedSet.contains( id ) )
+            changes.Updated.push_back( id );
+        else
+            changes.Created.push_back( id );
+    }
+
+    for( const KIID& id : removed )
+    {
+        if( !addedSet.contains( id ) )
+            changes.Deleted.push_back( id );
+    }
+
+    return changes;
+}
+
+
+void API_HANDLER_EDITOR::publishProjectChanged( events::ProjectChangeKind aKind,
+                                                const std::string& aClientName )
+{
+    if( !Server() )
+        return;
+
+    std::optional<DocumentSpecifier> doc = Document();
+
+    if( !doc || !doc->has_project() )
+        return;
+
+    events::Event           event;
+    events::ProjectChanged& changed = *event.mutable_project_changed();
+    *changed.mutable_project() = doc->project();
+    changed.set_kind( aKind );
+    changed.set_client_name( aClientName );
+    publish( event );
 }
 
 

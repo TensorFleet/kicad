@@ -1247,6 +1247,8 @@ HANDLER_RESULT<BoardDesignRulesResponse> API_HANDLER_PCB::handleSetBoardDesignRu
     HANDLER_CONTEXT<GetBoardDesignRules> getCtx = { aCtx.ClientName, GetBoardDesignRules() };
     *getCtx.Request.mutable_board() = aCtx.Request.board();
 
+    publishProjectChanged( kiapi::common::events::PCK_SETTINGS, aCtx.ClientName );
+
     return handleGetBoardDesignRules( getCtx );
 }
 
@@ -1435,6 +1437,8 @@ HANDLER_RESULT<CustomRulesResponse> API_HANDLER_PCB::handleSetCustomDesignRules(
 
     HANDLER_CONTEXT<GetCustomDesignRules> getCtx = { aCtx.ClientName, GetCustomDesignRules() };
     *getCtx.Request.mutable_board() = aCtx.Request.board();
+    publishProjectChanged( kiapi::common::events::PCK_SETTINGS, aCtx.ClientName );
+
     return handleGetCustomDesignRules( getCtx );
 }
 
@@ -2628,6 +2632,8 @@ HANDLER_RESULT<DrcSeveritiesResponse> API_HANDLER_PCB::handleSetDrcSeverities(
     if( !changes.empty() )
         bumpRevision();
 
+    publishProjectChanged( kiapi::common::events::PCK_SETTINGS, aCtx.ClientName );
+
     return drcSeverities();
 }
 
@@ -3529,6 +3535,9 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleAddVariant( const HANDLER_CONTEXT<A
     if( frame() )
         frame()->UpdateVariantSelectionCtrl();
 
+    bumpRevision();
+    publishProjectChanged( kiapi::common::events::PCK_VARIANTS, aCtx.ClientName );
+
     return Empty();
 }
 
@@ -3568,6 +3577,9 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleDeleteVariant( const HANDLER_CONTEX
 
     if( frame() )
         frame()->UpdateVariantSelectionCtrl();
+
+    bumpRevision();
+    publishProjectChanged( kiapi::common::events::PCK_VARIANTS, aCtx.ClientName );
 
     return Empty();
 }
@@ -3625,6 +3637,9 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleRenameVariant( const HANDLER_CONTEX
 
     if( frame() )
         frame()->UpdateVariantSelectionCtrl();
+
+    bumpRevision();
+    publishProjectChanged( kiapi::common::events::PCK_VARIANTS, aCtx.ClientName );
 
     return Empty();
 }
@@ -3685,6 +3700,9 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleCopyVariant( const HANDLER_CONTEXT<
     if( frame() )
         frame()->UpdateVariantSelectionCtrl();
 
+    bumpRevision();
+    publishProjectChanged( kiapi::common::events::PCK_VARIANTS, aCtx.ClientName );
+
     return Empty();
 }
 
@@ -3713,6 +3731,9 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleSetVariantDescription( const HANDLE
     }
 
     board->SetVariantDescription( name, wxString::FromUTF8( aCtx.Request.description() ) );
+
+    bumpRevision();
+    publishProjectChanged( kiapi::common::events::PCK_VARIANTS, aCtx.ClientName );
 
     return Empty();
 }
@@ -3748,6 +3769,9 @@ HANDLER_RESULT<Empty> API_HANDLER_PCB::handleSetCurrentVariant( const HANDLER_CO
         frame()->SetCurrentVariant( varName );
     else
         board->SetCurrentVariant( varName );
+
+    bumpRevision();
+    publishProjectChanged( kiapi::common::events::PCK_VARIANTS, aCtx.ClientName );
 
     return Empty();
 }
@@ -4638,5 +4662,7 @@ API_HANDLER_PCB::handleSetGraphicsDefaults( const HANDLER_CONTEXT<SetGraphicsDef
 
     GraphicsDefaultsResponse response;
     packGraphicsDefaults( *response.mutable_defaults() );
+    publishProjectChanged( kiapi::common::events::PCK_SETTINGS, aCtx.ClientName );
+
     return response;
 }

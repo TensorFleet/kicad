@@ -42,6 +42,7 @@
 #include <api/common/envelope.pb.h>
 #include <api/common/events.pb.h>
 #include <api/board/board_commands.pb.h>
+#include <api/common/commands/variant_commands.pb.h>
 
 #include <board.h>
 #include <pcb_track.h>
@@ -331,6 +332,76 @@ BOOST_AUTO_TEST_CASE( DocumentLifecycleEventsArePublished )
     std::optional<Event> shutdown = receiveKind( *subscriber, Event::kServerShutdown );
     BOOST_REQUIRE( shutdown.has_value() );
     BOOST_CHECK_GT( shutdown->sequence(), lastSequence );
+}
+
+
+BOOST_AUTO_TEST_CASE( ReplacedItemsAreReportedAsUpdated )
+{
+    // Since 11.0: a footprint is updated by replacing it with a new one carrying the same id;
+    // the event says "updated", not "deleted" and "created"
+    loadBoard( wxS( "issue5830" ) );
+
+    std::unique_ptr<EVENT_SUBSCRIBER> subscriber = startAndSubscribe();
+
+    auto handler = std::make_unique<API_HANDLER_PCB>( m_context );
+    m_server.RegisterHandler( handler.get() );
+    BOOST_REQUIRE( receiveKind( *subscriber, Event::kDocumentOpened ).has_value() );
+
+    BOARD*     board = m_context->GetBoard();
+    FOOTPRINT* footprint = board->GetFirstFootprint();
+    BOOST_REQUIRE( footprint );
+
+    kiapi::board::types::FootprintInstance instance;
+    {
+        google::protobuf::Any any;
+        footprint->Serialize( any );
+        BOOST_REQUIRE( any.UnpackTo( &instance ) );
+    }
+
+    instance.mutable_position()->set_x_nm( instance.position().x_nm() + 1000000 );
+
+    kiapi::common::commands::UpdateItems update;
+    *update.mutable_header()->mutable_document() = pcbDocument();
+    update.add_items()->PackFrom( instance );
+
+    kiapi::common::ApiRequest request = makeRequest( update );
+    BOOST_REQUIRE( handler->Handle( request ).has_value() );
+
+    std::optional<Event> changed = receiveKind( *subscriber, Event::kDocumentChanged );
+    BOOST_REQUIRE( changed.has_value() );
+    BOOST_REQUIRE_EQUAL( changed->document_changed().updated_size(), 1 );
+    BOOST_CHECK_EQUAL( changed->document_changed().updated( 0 ).value(), footprint->m_Uuid.AsStdString() );
+    BOOST_CHECK_EQUAL( changed->document_changed().created_size(), 0 );
+    BOOST_CHECK_EQUAL( changed->document_changed().deleted_size(), 0 );
+
+    m_server.DeregisterHandler( handler.get() );
+}
+
+
+BOOST_AUTO_TEST_CASE( VariantChangesPublishProjectChanged )
+{
+    // Since 11.0
+    loadBoard( wxS( "issue5830" ) );
+
+    std::unique_ptr<EVENT_SUBSCRIBER> subscriber = startAndSubscribe();
+
+    auto handler = std::make_unique<API_HANDLER_PCB>( m_context );
+    m_server.RegisterHandler( handler.get() );
+    BOOST_REQUIRE( receiveKind( *subscriber, Event::kDocumentOpened ).has_value() );
+
+    kiapi::common::commands::AddVariant add;
+    *add.mutable_document() = pcbDocument();
+    add.set_name( "QA" );
+
+    kiapi::common::ApiRequest request = makeRequest( add );
+    BOOST_REQUIRE( handler->Handle( request ).has_value() );
+
+    std::optional<Event> projectChanged = receiveKind( *subscriber, Event::kProjectChanged );
+    BOOST_REQUIRE( projectChanged.has_value() );
+    BOOST_CHECK_EQUAL( projectChanged->project_changed().kind(), kiapi::common::events::PCK_VARIANTS );
+    BOOST_CHECK_EQUAL( projectChanged->project_changed().client_name(), "kicad.qa.events" );
+
+    m_server.DeregisterHandler( handler.get() );
 }
 
 

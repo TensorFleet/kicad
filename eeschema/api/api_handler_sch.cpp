@@ -755,6 +755,8 @@ HANDLER_RESULT<ErcSeveritiesResponse> API_HANDLER_SCH::handleSetErcSeverities(
     if( !changes.empty() )
         bumpRevision();
 
+    publishProjectChanged( kiapi::common::events::PCK_SETTINGS, aCtx.ClientName );
+
     return ercSeverities();
 }
 
@@ -3096,6 +3098,9 @@ HANDLER_RESULT<Empty> API_HANDLER_SCH::handleAddVariant( const HANDLER_CONTEXT<A
     if( m_frame )
         frame()->UpdateVariantSelectionCtrl( frame()->Schematic().GetVariantNamesForUI() );
 
+    bumpRevision();
+    publishProjectChanged( kiapi::common::events::PCK_VARIANTS, aCtx.ClientName );
+
     return Empty();
 }
 
@@ -3142,6 +3147,9 @@ HANDLER_RESULT<Empty> API_HANDLER_SCH::handleDeleteVariant( const HANDLER_CONTEX
         frame()->UpdateVariantSelectionCtrl( frame()->Schematic().GetVariantNamesForUI() );
         frame()->GetCanvas()->Refresh();
     }
+
+    bumpRevision();
+    publishProjectChanged( kiapi::common::events::PCK_VARIANTS, aCtx.ClientName );
 
     return Empty();
 }
@@ -3201,6 +3209,9 @@ HANDLER_RESULT<Empty> API_HANDLER_SCH::handleRenameVariant( const HANDLER_CONTEX
     if( m_frame )
         frame()->UpdateVariantSelectionCtrl( frame()->Schematic().GetVariantNamesForUI() );
 
+    bumpRevision();
+    publishProjectChanged( kiapi::common::events::PCK_VARIANTS, aCtx.ClientName );
+
     return Empty();
 }
 
@@ -3259,6 +3270,9 @@ HANDLER_RESULT<Empty> API_HANDLER_SCH::handleCopyVariant( const HANDLER_CONTEXT<
     if( m_frame )
         frame()->UpdateVariantSelectionCtrl( frame()->Schematic().GetVariantNamesForUI() );
 
+    bumpRevision();
+    publishProjectChanged( kiapi::common::events::PCK_VARIANTS, aCtx.ClientName );
+
     return Empty();
 }
 
@@ -3286,6 +3300,9 @@ HANDLER_RESULT<Empty> API_HANDLER_SCH::handleSetVariantDescription( const HANDLE
     }
 
     schematic->SetVariantDescription( name, wxString::FromUTF8( aCtx.Request.description() ) );
+
+    bumpRevision();
+    publishProjectChanged( kiapi::common::events::PCK_VARIANTS, aCtx.ClientName );
 
     return Empty();
 }
@@ -3321,6 +3338,9 @@ HANDLER_RESULT<Empty> API_HANDLER_SCH::handleSetCurrentVariant( const HANDLER_CO
         frame()->SetCurrentVariant( name );
     else
         schematic->SetCurrentVariant( name );
+
+    bumpRevision();
+    publishProjectChanged( kiapi::common::events::PCK_VARIANTS, aCtx.ClientName );
 
     return Empty();
 }
@@ -4173,6 +4193,8 @@ API_HANDLER_SCH::handleSetSchematicSettings( const HANDLER_CONTEXT<SetSchematicS
 
     kiapi::schematic::commands::SchematicSettings response;
     packSchematicSettings( response );
+    publishProjectChanged( kiapi::common::events::PCK_SETTINGS, aCtx.ClientName );
+
     return response;
 }
 
