@@ -131,6 +131,11 @@ void API_HANDLER_BOARD::pushCurrentCommit( const std::string& aClientName,
                                             const wxString& aMessage )
 {
     API_HANDLER_EDITOR::pushCurrentCommit( aClientName, aMessage );
+
+    // The push already advanced the revision, carrying the full list of created, updated and
+    // deleted items.  onModified() is called here for its side effects only; letting it bump the
+    // revision again would report a second change that no client can resolve to any item.
+    REVISION_BUMP_INHIBITOR inhibit( *this );
     onModified();
 }
 

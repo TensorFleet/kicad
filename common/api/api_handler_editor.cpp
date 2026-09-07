@@ -768,6 +768,9 @@ void API_HANDLER_EDITOR::NotifyDocumentOpened()
 
 void API_HANDLER_EDITOR::bumpRevision()
 {
+    if( m_inhibitRevisionBump )
+        return;
+
     publishDocumentChanged( "", wxEmptyString );
 }
 

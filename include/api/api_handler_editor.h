@@ -393,6 +393,32 @@ protected:
      */
     virtual void onModified() { bumpRevision(); }
 
+    /**
+     * Suppresses bumpRevision() for its lifetime.  Used where the document is changed through a
+     * path that already recorded a revision with the full item delta, but that also runs
+     * onModified() for its side effects (a canvas refresh, the modified flag); without this the
+     * change would be counted a second time, as a revision carrying no item details.
+     */
+    class REVISION_BUMP_INHIBITOR
+    {
+    public:
+        REVISION_BUMP_INHIBITOR( API_HANDLER_EDITOR& aHandler ) :
+                m_handler( aHandler ),
+                m_previous( aHandler.m_inhibitRevisionBump )
+        {
+            m_handler.m_inhibitRevisionBump = true;
+        }
+
+        ~REVISION_BUMP_INHIBITOR() { m_handler.m_inhibitRevisionBump = m_previous; }
+
+        REVISION_BUMP_INHIBITOR( const REVISION_BUMP_INHIBITOR& ) = delete;
+        REVISION_BUMP_INHIBITOR& operator=( const REVISION_BUMP_INHIBITOR& ) = delete;
+
+    private:
+        API_HANDLER_EDITOR& m_handler;
+        bool                m_previous;
+    };
+
 protected:
     std::map<std::string, std::pair<KIID, std::unique_ptr<COMMIT>>> m_commits;
 
@@ -404,6 +430,9 @@ protected:
     uint64_t m_revision;
 
 private:
+    /// While set, bumpRevision() does nothing; see REVISION_BUMP_INHIBITOR
+    bool m_inhibitRevisionBump = false;
+
     /// Advance m_revision and log what changed; every revision step goes through here
     void advanceRevision( bool aComplete, const COMMIT* aCommit );
 
