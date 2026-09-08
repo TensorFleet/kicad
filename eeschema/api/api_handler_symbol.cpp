@@ -170,6 +170,20 @@ public:
         clear();
     }
 
+    EDA_ITEM* ResolveItem( KIID& aID ) override
+    {
+        if( aID == niluuid )
+            return nullptr;
+
+        for( COMMIT_LINE& ent : m_entries )
+        {
+            if( ent.m_item && ent.m_item->IsSCH_ITEM() && ent.m_item->m_Uuid == aID )
+                return ent.m_item;
+        }
+
+        return nullptr;
+    }
+
 protected:
     EDA_ITEM* undoLevelItem( EDA_ITEM* aItem ) const override { return aItem; }
 
