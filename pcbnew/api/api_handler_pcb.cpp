@@ -2086,7 +2086,7 @@ HANDLER_RESULT<ImportNetlistResponse> API_HANDLER_PCB::handleImportNetlist( cons
     if( !aCtx.Request.dry_run() && success )
     {
         ctx->OnNetlistChanged( *updater );
-        bumpRevision();
+        publishDocumentChanged( aCtx.ClientName, _( "Update Netlist" ) );
     }
 
     ImportNetlistResponse response;
