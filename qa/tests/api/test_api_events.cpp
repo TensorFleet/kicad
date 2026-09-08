@@ -377,6 +377,7 @@ BOOST_AUTO_TEST_CASE( ReplacedItemsAreReportedAsUpdated )
     BOOST_CHECK_EQUAL( changed->document_changed().deleted_size(), 0 );
 
     m_server.DeregisterHandler( handler.get() );
+    m_server.Stop();
 }
 
 
@@ -425,6 +426,7 @@ BOOST_AUTO_TEST_CASE( ImportNetlistPublishesDocumentChanged )
     BOOST_CHECK_EQUAL( changed->document_changed().document().board_filename(), pcbDocument().board_filename() );
 
     m_server.DeregisterHandler( handler.get() );
+    m_server.Stop();
     wxRemoveFile( netlistPath );
 }
 
@@ -453,6 +455,7 @@ BOOST_AUTO_TEST_CASE( VariantChangesPublishProjectChanged )
     BOOST_CHECK_EQUAL( projectChanged->project_changed().client_name(), "kicad.qa.events" );
 
     m_server.DeregisterHandler( handler.get() );
+    m_server.Stop();
 }
 
 

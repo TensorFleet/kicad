@@ -84,8 +84,6 @@ target_compile_definitions( qa_api PRIVATE
 
 kicad_add_boost_test( qa_api qa_api )
 
-# The complete headless API suite now includes long-running routing/job coverage and exceeds three
-# minutes on a release Linux build.  Keep a finite guard while allowing the full test to finish.
-set_tests_properties( qa_api PROPERTIES TIMEOUT 600 )
+set_tests_properties( qa_api PROPERTIES TIMEOUT 180 )
 
 setup_qa_env( qa_api )
