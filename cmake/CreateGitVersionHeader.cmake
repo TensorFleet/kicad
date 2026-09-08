@@ -28,10 +28,13 @@ macro( create_git_version_header _git_src_path )
         set( _Git_SAVED_LC_ALL "$ENV{LC_ALL}" )
         set( ENV{LC_ALL} C )
 
-        # Use `git describe --dirty` to create the KiCad version string.
+        # Use `git describe --dirty` to create the KiCad version string.  Match only KiCad's
+        # own version tags: a fork or a downstream packager may carry tags of its own, and the
+        # nearest of those would otherwise shadow the version tag that
+        # KICAD_MAJOR_MINOR_PATCH_VERSION is parsed out of, leaving it empty.
         execute_process(
             COMMAND
-            ${GIT_EXECUTABLE} describe --dirty
+            ${GIT_EXECUTABLE} describe --dirty --match "[0-9]*"
             WORKING_DIRECTORY ${_git_src_path}
             OUTPUT_VARIABLE _git_DESCRIBE
             ERROR_VARIABLE _git_describe_error
