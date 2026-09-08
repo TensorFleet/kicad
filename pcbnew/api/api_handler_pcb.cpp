@@ -238,7 +238,8 @@ API_HANDLER_PCB::API_HANDLER_PCB( std::shared_ptr<PCB_CONTEXT> aContext, PCB_EDI
     registerHandler<GlobalDeletion, GlobalDeletionResponse>( &API_HANDLER_PCB::handleGlobalDeletion );
     registerHandler<ImportSpecctraSession, ImportSpecctraSessionResponse>(
             &API_HANDLER_PCB::handleImportSpecctraSession );
-    registerHandler<GetGraphicsDefaults, GraphicsDefaultsResponse>( &API_HANDLER_PCB::handleGetGraphicsDefaults );
+    // GetGraphicsDefaults is registered by API_HANDLER_BOARD. Registering it again here trips the
+    // duplicate-handler guard and prevents every headless PCB handler from being constructed.
     registerHandler<SetGraphicsDefaults, GraphicsDefaultsResponse>( &API_HANDLER_PCB::handleSetGraphicsDefaults );
 
     registerHandler<HighlightNets, HighlightNetsResponse>(
