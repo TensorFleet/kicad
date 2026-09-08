@@ -207,7 +207,7 @@ int GLOBAL_EDIT_TOOL::EditTracksAndVias( const TOOL_EVENT& aEvent )
 
 int GLOBAL_EDIT_TOOL::CleanupTracksAndVias( const TOOL_EVENT& aEvent )
 {
-    PCB_EDIT_FRAME* editFrame = getEditFrame<PCB_EDIT_FRAME>();
+    PCB_EDIT_FRAME* editFrame = m_toolMgr->GetToolHolder() ? getEditFrame<PCB_EDIT_FRAME>() : nullptr;
 
     // Without a frame (kicad-cli api-server) there is nobody to ask: run the cleanup with the
     // dialog's default options and commit it
@@ -243,7 +243,7 @@ int GLOBAL_EDIT_TOOL::CleanupTracksAndVias( const TOOL_EVENT& aEvent )
 
 int GLOBAL_EDIT_TOOL::CleanupGraphics( const TOOL_EVENT& aEvent )
 {
-    PCB_EDIT_FRAME* editFrame = getEditFrame<PCB_EDIT_FRAME>();
+    PCB_EDIT_FRAME* editFrame = m_toolMgr->GetToolHolder() ? getEditFrame<PCB_EDIT_FRAME>() : nullptr;
 
     if( !editFrame )
     {
@@ -392,5 +392,4 @@ void GLOBAL_EDIT_TOOL::setTransitions()
     Go( &GLOBAL_EDIT_TOOL::RemoveUnusedPads,     PCB_ACTIONS::removeUnusedPads.MakeEvent() );
     Go( &GLOBAL_EDIT_TOOL::ZonesManager,         PCB_ACTIONS::zonesManager.MakeEvent() );
 }
-
 

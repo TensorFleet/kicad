@@ -624,6 +624,7 @@ types::GraphicFillType ToProtoEnum( FILL_T aValue )
     case FILL_T::HATCH:                     return types::GraphicFillType::GFT_HATCH;
     case FILL_T::REVERSE_HATCH:             return types::GraphicFillType::GFT_REVERSE_HATCH;
     case FILL_T::CROSS_HATCH:               return types::GraphicFillType::GFT_CROSS_HATCH;
+    case static_cast<FILL_T>( 0 ):           return types::GraphicFillType::GFT_UNKNOWN;
     default:
         wxCHECK_MSG( false, types::GraphicFillType::GFT_UNKNOWN,
                      "Unhandled case in ToProtoEnum<FILL_T>" );
