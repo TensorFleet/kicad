@@ -103,6 +103,7 @@ set( EESCHEMA_SCH_IO
     sch_io/pads/pads_sch_binary_builder.cpp
     sch_io/pads/pads_sch_binary_parser.cpp
     sch_io/pads/pads_sch_sdb.cpp
+    sch_io/ole_emf.cpp
     sch_io/ole_image.cpp
 
     # DipTrace IO plugin
@@ -115,10 +116,10 @@ set( EESCHEMA_SCH_IO
 
     # OrCAD IO plugin
     sch_io/orcad/orcad_cache.cpp
+    sch_io/orcad/orcad_cis.cpp
     sch_io/orcad/orcad_converter_sheet.cpp
     sch_io/orcad/orcad_converter_symbols.cpp
     sch_io/orcad/orcad_library.cpp
-    sch_io/orcad/orcad_ole.cpp
     sch_io/orcad/orcad_page.cpp
     sch_io/orcad/orcad_stream.cpp
     sch_io/orcad/orcad_structures.cpp
@@ -681,6 +682,7 @@ target_link_libraries( eeschema_kiface_objects
     PUBLIC
         common
         libwmf_orcad
+        emf2svg
         pads_common
         pcm )
 

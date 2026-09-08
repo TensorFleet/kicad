@@ -352,9 +352,20 @@ PCB_PROPERTIES_PANEL::PCB_PROPERTIES_PANEL( wxWindow* aParent, PCB_BASE_EDIT_FRA
         PROPERTIES_PANEL( aParent, aFrame ),
         m_frame( aFrame ),
         m_propMgr( PROPERTY_MANAGER::Instance() ),
-        m_addCustomPropertyButton( nullptr ),
         m_scaleConfirmPending( false )
 {
+    addCategoryButton( _HKI( "Custom Properties" ), _( "Add Custom Property" ), BITMAPS::small_plus,
+                       [this]()
+                       {
+                           addBlankCustomProperty();
+                       } );
+
+    addCategoryButton( _HKI( "Fields" ), _( "Add Field" ), BITMAPS::small_plus,
+                       [this]()
+                       {
+                           addBlankField();
+                       } );
+
     m_propMgr.Rebuild();
     bool found = false;
 
@@ -461,15 +472,6 @@ PCB_PROPERTIES_PANEL::PCB_PROPERTIES_PANEL( wxWindow* aParent, PCB_BASE_EDIT_FRA
     Bind( wxEVT_MENU, &PCB_PROPERTIES_PANEL::onContextMenu, this, ID_CTX_ADD_CUSTOM_PROPERTY );
     Bind( wxEVT_MENU, &PCB_PROPERTIES_PANEL::onContextMenu, this, ID_CTX_REMOVE_FIELD );
     Bind( wxEVT_MENU, &PCB_PROPERTIES_PANEL::onContextMenu, this, ID_CTX_REMOVE_CUSTOM_PROPERTY );
-
-    m_addCustomPropertyButton = new wxButton( this, wxID_ANY, _( "Add Custom Property" ) );
-    GetSizer()->Add( m_addCustomPropertyButton, 0, wxALL | wxEXPAND, 5 );
-
-    m_addCustomPropertyButton->Bind( wxEVT_BUTTON,
-                                     [this]( wxCommandEvent& )
-                                     {
-                                         addBlankCustomProperty();
-                                     } );
 }
 
 
@@ -679,6 +681,8 @@ void PCB_PROPERTIES_PANEL::addBlankField()
     SELECTION fallbackSelection;
     const SELECTION& selection = getSelection( fallbackSelection );
 
+    settlePendingLabelEdit();
+
     if( selection.Empty() )
         return;
 
@@ -733,6 +737,8 @@ void PCB_PROPERTIES_PANEL::addBlankCustomProperty()
 {
     SELECTION fallbackSelection;
     const SELECTION& selection = getSelection( fallbackSelection );
+
+    settlePendingLabelEdit();
 
     if( selection.Empty() )
         return;
@@ -797,7 +803,12 @@ void PCB_PROPERTIES_PANEL::removeField( const wxString& aName )
         PCB_FIELD* field     = footprint->GetField( aName );
 
         if( field && !field->IsMandatory() )
-            changes.Remove( field );
+        {
+            // BOARD_COMMIT's own field removal path only hides the field (e.g. when a user presses the delete key),
+            // we want to actually delete a custom field from this explicit menu action
+            changes.Modify( footprint, nullptr, RECURSE_MODE::NO_RECURSE );
+            footprint->Remove( field );
+        }
     }
 
     changes.Push( _( "Remove Field" ) );
