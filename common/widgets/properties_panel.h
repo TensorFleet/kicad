@@ -23,15 +23,18 @@
 #include <wx/panel.h>
 #include <wx/propgrid/propgrid.h>
 
+#include <bitmaps/bitmaps_list.h>
 #include <vector>
 #include <memory>
+#include <functional>
 
 class EDA_BASE_FRAME;
 class EDA_ITEM;
 class SELECTION;
 class PROPERTY_BASE;
+class BITMAP_BUTTON;
+class wxPropertyGridEvent;
 class wxStaticText;
-class wxMenu;
 
 enum PROPERTIES_PANEL_CONTEXT_MENU_IDS
 {
@@ -43,9 +46,10 @@ enum PROPERTIES_PANEL_CONTEXT_MENU_IDS
 
 class PROPERTIES_PANEL : public wxPanel
 {
+    friend class PROPERTIES_PANEL_GRID;
+
 public:
     PROPERTIES_PANEL( wxWindow* aParent, EDA_BASE_FRAME* aFrame );
-
     virtual ~PROPERTIES_PANEL();
 
     virtual void UpdateData() = 0;
@@ -103,6 +107,9 @@ protected:
 
     void beginLabelEdit( const wxString& aKey, bool aStartBlank = false );
 
+    /// Synchronously ends any in-progress label edit; potentially canceling a newly added row
+    void settlePendingLabelEdit();
+
     /**
      * Utility to fetch a property value and convert to wxVariant
      * Precondition: aItem is known to have property aProperty
@@ -122,6 +129,40 @@ protected:
     bool extractValueAndWritability( const SELECTION& aSelection, const wxString& aPropName,
                                      wxVariant& aValue, bool& aWritable, wxPGChoices& aChoices );
 
+    /**
+     * Registers an overlay button on a category caption row.  The button is shown
+     * when its category row is on-screen and selection-appropriate (the optional
+     * enable predicate is consulted; it is re-evaluated on every rebuild).
+     *
+     * TODO it would be nice to remove this hack by getting upstream wxWidgets to support
+     * customizing/subclassing the property group widgets
+     *
+     * @param aGroupKey is the untranslated group name (e.g. _HKI( "Fields" )).
+     * @param aTooltip is the tooltip text (translated by the caller).
+     * @param aBitmap is the icon shown on the button.
+     * @param aAction is invoked when the button is clicked.
+     * @param aEnableFunc optionally controls visibility (evaluated on each rebuild).
+     * @param aForceCategory optionally forces the category caption row to be emitted
+     *        during rebuilds (only when aEnableFunc, if set, returns true).
+     */
+    void addCategoryButton( const wxString& aGroupKey, const wxString& aTooltip,
+                            BITMAPS aBitmap, std::function<void()> aAction,
+                            std::function<bool()> aEnableFunc = nullptr,
+                            bool aForceCategory = false );
+
+    /// Updates overlay button visibility/positions; called after rebuilds and on scroll.
+    void updateCategoryButtons();
+
+    /// Hides all overlay buttons (used when no selection or a rebuild is deferred).
+    void hideCategoryButtons();
+
+    void positionCategoryButtons();
+
+    ///< Find the caption row for the given untranslated group name, if present.
+    wxPGProperty* categoryForGroup( const wxString& aGroupKey ) const;
+
+    wxStaticText*               m_caption;
+
 public:
     int                         m_SuppressGridChangeEvents;
 
@@ -129,7 +170,6 @@ protected:
     std::vector<PROPERTY_BASE*> m_displayed;    // no ownership of pointers
     wxPropertyGrid*             m_grid;
     EDA_BASE_FRAME*             m_frame;
-    wxStaticText*               m_caption;
 
     /// Proportion of the grid column splitter that is used for the key column (0.0 - 1.0)
     float m_splitter_key_proportion;
@@ -138,9 +178,27 @@ protected:
 
     wxString m_contextMenuPropertyName;
 
+    struct CATEGORY_BUTTON
+    {
+        BITMAP_BUTTON*           button;
+        wxString                 groupKey;      ///< untranslated group name of host category
+        std::function<void()>    action;
+        std::function<bool()>    enableFunc;    ///< optional extra enable predicate
+
+        ///< Emit the category caption row even when it has no properties; the row is
+        ///< only forced on rebuilds where enableFunc() (if set) returns true.
+        bool                     forceCategory = false;
+    };
+
+    std::vector<CATEGORY_BUTTON> m_categoryButtons;
+
+    /// True while settling a pending label edit synchronously (see settlePendingLabelEdit).
+    bool m_resolvingPendingKey = false;
+
     /// Key of a freshly-added blank field/custom property awaiting a name from the user.
     wxString m_pendingNewKey;
 };
+
 
 class SUPPRESS_GRID_CHANGED_EVENTS
 {

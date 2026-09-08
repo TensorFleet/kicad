@@ -1707,6 +1707,10 @@ HANDLER_RESULT<ItemRequestStatus> API_HANDLER_SCH::handleCreateUpdateItemsIntern
                 }
             }
         }
+        else if( SCH_GROUP* group = dynamic_cast<SCH_GROUP*>( item.get() ) )
+        {
+            unpacked = group->DeserializeGroup( anyItem, commit );
+        }
         else
         {
             unpacked = item->Deserialize( anyItem );
@@ -2004,37 +2008,41 @@ std::optional<SCH_SHEET_PATH> API_HANDLER_SCH::resolveSheet( const DocumentSpeci
 }
 
 
-std::optional<TITLE_BLOCK*> API_HANDLER_SCH::getTitleBlock( const DocumentSpecifier& aDocument )
+SCH_SCREEN* API_HANDLER_SCH::resolveScreenFromDocument( const DocumentSpecifier& aDocument ) const
 {
     std::optional<SCH_SHEET_PATH> sheet = resolveSheet( aDocument );
 
-    if( !sheet || !sheet->LastScreen() )
-        return std::nullopt;
+    return sheet ? sheet->LastScreen() : nullptr;
+}
 
-    return &sheet->LastScreen()->GetTitleBlock();
+
+std::optional<TITLE_BLOCK*> API_HANDLER_SCH::getTitleBlock( const DocumentSpecifier& aDocument )
+{
+    if( SCH_SCREEN* screen = resolveScreenFromDocument( aDocument ) )
+        return &screen->GetTitleBlock();
+
+    return std::nullopt;
 }
 
 
 std::optional<PAGE_INFO> API_HANDLER_SCH::getPageSettings( const DocumentSpecifier& aDocument )
 {
-    std::optional<SCH_SHEET_PATH> sheet = resolveSheet( aDocument );
+    if( SCH_SCREEN* screen = resolveScreenFromDocument( aDocument ) )
+        return screen->GetPageSettings();
 
-    if( !sheet || !sheet->LastScreen() )
-        return std::nullopt;
-
-    return sheet->LastScreen()->GetPageSettings();
+    return std::nullopt;
 }
 
 
 bool API_HANDLER_SCH::setPageSettings( const DocumentSpecifier& aDocument, const PAGE_INFO& aPageInfo )
 {
-    std::optional<SCH_SHEET_PATH> sheet = resolveSheet( aDocument );
+    if( SCH_SCREEN* screen = resolveScreenFromDocument( aDocument ) )
+    {
+        screen->SetPageSettings( aPageInfo );
+        return true;
+    }
 
-    if( !sheet || !sheet->LastScreen() )
-        return false;
-
-    sheet->LastScreen()->SetPageSettings( aPageInfo );
-    return true;
+    return false;
 }
 
 

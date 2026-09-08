@@ -74,7 +74,6 @@ set( QA_COMMON_SRCS
     test_markup_parser.cpp
     test_kicad_string.cpp
     test_kicad_stroke_font.cpp
-    test_outline_font.cpp
     test_dxf_plotter.cpp
     test_gerber_plotter.cpp
     test_pdf_unicode_plot.cpp
@@ -235,6 +234,7 @@ target_link_libraries( qa_common
     qa_utils
     Boost::headers
     Boost::unit_test_framework
+    Fontconfig::Fontconfig
     ${wxWidgets_LIBRARIES}
     ZLIB::ZLIB
     ${CMAKE_DL_LIBS}
