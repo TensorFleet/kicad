@@ -27,6 +27,9 @@
 #include <erc/erc_report.h>
 #include <settings/settings_manager.h>
 #include <locale_io.h>
+#include <json_common.h>
+
+#include <fstream>
 
 struct ERC_REGRESSION_TEST_FIXTURE
 {
@@ -69,5 +72,21 @@ BOOST_FIXTURE_TEST_CASE( ERCUnconnectedWireEndpoints, ERC_REGRESSION_TEST_FIXTUR
                              "Expected " << test.second << " errors in " << test.first.ToStdString()
                                          << " but got " << errors.GetCount() << "\n"
                                          << reportWriter.GetTextReport() );
+
+        wxString jsonPath = wxFileName::CreateTempFileName( wxT( "kicad-erc-wire-json-" ) );
+        BOOST_REQUIRE( reportWriter.WriteJsonReport( jsonPath ) );
+
+        std::ifstream reportStream( jsonPath.fn_str() );
+        BOOST_REQUIRE( reportStream.is_open() );
+        nlohmann::json reportJson;
+        reportStream >> reportJson;
+        reportStream.close();
+        wxRemoveFile( jsonPath );
+
+        // The first endpoint is at (97.79 mm, 105.41 mm) in the fixture.  The JSON writer must
+        // use schematic internal units; pcbIUScale would incorrectly report (0.9779, 1.0541).
+        const auto& pos = reportJson["sheets"][0]["violations"][0]["items"][0]["pos"];
+        BOOST_CHECK_CLOSE( pos["x"].get<double>(), 97.79, 0.001 );
+        BOOST_CHECK_CLOSE( pos["y"].get<double>(), 105.41, 0.001 );
     }
 }
