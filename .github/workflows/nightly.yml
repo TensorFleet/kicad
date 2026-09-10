@@ -141,10 +141,12 @@ jobs:
           filter: tree:0
           fetch-tags: true
 
-      # ---- compiler cache (Linux, macOS)
+      # ---- compiler cache (Linux, macOS).  Restored and saved as two steps so that a job
+      # which fails after the compile (bundle, smoke test) still keeps the objects it built;
+      # actions/cache alone only saves when the job succeeds.
       - name: Restore ccache
         if: matrix.os != 'windows'
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ matrix.platform }}-${{ needs.prepare.outputs.sha }}
@@ -158,6 +160,13 @@ jobs:
       - name: Build (Linux)
         if: matrix.os == 'linux'
         run: bash tools/nightly/linux/build.sh
+
+      - name: Save ccache (Linux)
+        if: matrix.os == 'linux' && always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ matrix.platform }}-${{ needs.prepare.outputs.sha }}
 
       - name: Bundle (Linux)
         if: matrix.os == 'linux'
@@ -175,6 +184,13 @@ jobs:
       - name: Build (macOS)
         if: matrix.os == 'macos'
         run: bash tools/nightly/macos/build.sh
+
+      - name: Save ccache (macOS)
+        if: matrix.os == 'macos' && always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ matrix.platform }}-${{ needs.prepare.outputs.sha }}
 
       - name: Bundle (macOS)
         if: matrix.os == 'macos'
