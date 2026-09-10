@@ -134,6 +134,11 @@ stage_protoc() {
     [ -n "$built" ] || die "protoc was not produced under $BLD/protobuf"
     cp -L "$built" "$BIN/protoc"
 
+    # protoc resolves the well-known types (google/protobuf/any.proto, ...) from
+    # <dir of the binary>/../include; a bare binary copied out of the build tree has none.
+    mkdir -p "$TOOLS_ROOT/include/google/protobuf"
+    cp "$SRC/protobuf-${PROTOBUF_VERSION}/src/google/protobuf/"*.proto "$TOOLS_ROOT/include/google/protobuf/"
+
     local got
     got="$( "$BIN/protoc" --version | awk '{print $2}' )"
     [ "$got" = "$PROTOBUF_VERSION" ] || die "built protoc reports $got, expected $PROTOBUF_VERSION"
