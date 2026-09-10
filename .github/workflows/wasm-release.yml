@@ -1,0 +1,281 @@
+# Build KiCad's headless API core for wasm32-emscripten and publish it as a release
+# artifact, so FabPlane PCB can download `kicad_api.js` / `kicad_api.wasm` instead of
+# reproducing the ~80-minute toolchain build locally.
+#
+#   push of an alignment tag `fp-pcb/*`  -> build, upload the run artifact, and attach the
+#                                           tarball to the GitHub Release for that tag
+#                                           (the release is created if it does not exist)
+#   workflow_dispatch                    -> build any ref; only attaches to a release when
+#                                           `attach_to_release` is ticked and the ref is a tag
+#
+# The asset is `kicad-wasm-<tag with / replaced by ->.tar.gz`, produced by
+# tools/wasm/package.sh, and contains kicad_api.js, kicad_api.wasm, (kicad_api.data when the
+# build ever preloads one), kicad-wasm.json and SHA256SUMS.  fab_pcb's
+# packages/kicad-wasm/scripts/fetch.ts downloads and verifies exactly that.
+#
+# Everything here is a call into tools/wasm/*.sh so the same steps run locally; see
+# host/STATUS-release-artifact.md, host/STATUS-wasm-deps.md and host/STATUS-wasm-build.md.
+#
+# Timings, from the macOS runs: dependencies ~30 min (cached after the first run), the
+# module itself ~50 min from clean.  Only macOS has actually been exercised end to end --
+# the Linux path below is the same sequence with apt + emsdk instead of Homebrew.
+
+name: kicad-wasm release
+
+on:
+  push:
+    tags:
+      - 'fp-pcb/*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag, branch or commit to build (default: the ref this was dispatched on)'
+        required: false
+        default: ''
+      attach_to_release:
+        description: 'Attach the tarball to a GitHub Release (the ref must be a tag)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kicad-wasm-release-${{ github.event.inputs.ref || github.ref }}
+  cancel-in-progress: false
+
+env:
+  # tools/wasm/env.sh and host/STATUS-wasm-deps.md pin this: emcc 6.0.9 is what every
+  # library in the wasm prefix was compiled with, and -sWASM_LEGACY_EXCEPTIONS=1 is its
+  # default.  6.0.9 is a real emsdk release tag (emscripten-releases-tags.json), so
+  # `emsdk install 6.0.9` gets the same compiler Homebrew builds from the 6.0.9 source tag
+  # (Homebrew's `emcc --version` reports it as "6.0.9-git").
+  EMSDK_VERSION: '6.0.9'
+  EM_CACHE: ${{ github.workspace }}/.emcache
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 3G
+
+jobs:
+  build:
+    name: kicad_api.wasm (ubuntu)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Resolve the ref and tag
+        id: ref
+        env:
+          INPUT_REF: ${{ github.event.inputs.ref }}
+          GITHUB_REF_NAME_ENV: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          ref="${INPUT_REF:-$GITHUB_REF_NAME_ENV}"
+          case "$ref" in
+            refs/tags/*)   tag="${ref#refs/tags/}" ;;
+            refs/heads/*)  tag="" ;;
+            fp-pcb/*)      tag="$ref" ;;
+            *)             tag="" ;;
+          esac
+          echo "ref=$ref"   >> "$GITHUB_OUTPUT"
+          echo "tag=$tag"   >> "$GITHUB_OUTPUT"
+          echo "building ref=$ref tag=${tag:-<none, package.sh will use git describe>}"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+          # package.sh calls `git describe --match 'fp-pcb/*'`, which needs the tags.
+          fetch-depth: 0
+
+      # ------------------------------------------------------------------ host toolchain
+      # No native KiCad build happens here: of everything under build/headless, configure.sh
+      # only needs `lemon`, and tools/wasm/host-tools.sh compiles that single C file directly.
+      # So this list is the wasm build's host requirements only -- no wxGTK, OCCT or ngspice.
+      #   libglm-dev  GLM is header-only and architecture independent; configure.sh passes the
+      #               host copy as GLM_INCLUDE_DIR (PDF_plotter.cpp, the easyedapro parser).
+      #   rsync       build-deps.sh copies wx's full include/wx over the base-only install.
+      - name: apt dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config ccache \
+            python3 git curl ca-certificates rsync patch bzip2 xz-utils \
+            libglm-dev
+
+      - name: Cache emsdk
+        id: cache-emsdk
+        uses: actions/cache@v4
+        with:
+          path: ~/emsdk
+          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}
+
+      - name: Install emsdk ${{ env.EMSDK_VERSION }}
+        run: |
+          set -euo pipefail
+          if [ ! -d ~/emsdk/.git ]; then
+            git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
+          fi
+          cd ~/emsdk
+          ./emsdk install "$EMSDK_VERSION"
+          ./emsdk activate "$EMSDK_VERSION"
+          # Export the activated toolchain to every later step.
+          # shellcheck disable=SC1091
+          source ./emsdk_env.sh
+          {
+            echo "EMSDK=$EMSDK"
+            echo "EMSDK_NODE=$EMSDK_NODE"
+          } >> "$GITHUB_ENV"
+          {
+            echo "$EMSDK"
+            echo "$EMSDK/upstream/emscripten"
+            dirname "$EMSDK_NODE"
+          } >> "$GITHUB_PATH"
+          emcc --version | head -1
+
+      - name: Verify emcc is the pinned version
+        run: |
+          set -euo pipefail
+          got="$(emcc --version | head -1 | sed -n 's/.*) \([0-9][^ ]*\).*/\1/p')"
+          echo "emcc reports: $got (pinned: $EMSDK_VERSION)"
+          case "$got" in
+            "$EMSDK_VERSION"|"$EMSDK_VERSION"-*) ;;
+            *)
+              echo "::error::emcc is $got, expected $EMSDK_VERSION -- every library in build/wasm-deps was compiled with the pinned compiler and the exception ABI has to match"
+              exit 1
+              ;;
+          esac
+
+      # ------------------------------------------------------------------ native host tools
+      # protoc must be EXACTLY the protobuf version the wasm libprotobuf is built from
+      # (generated .pb.cc aborts at static-init on a mismatch), and no apt release ships
+      # protobuf 36.1 -- Debian trixie / Ubuntu 24.04, which packages/kicad-patches/docker uses
+      # for the native kicad-cli image, is on the 3.x line.  So build it (~5-8 min, cached).
+      - name: Cache native host tools (lemon, protoc)
+        id: cache-host-tools
+        uses: actions/cache@v4
+        with:
+          path: build/host-tools
+          key: host-tools-${{ runner.os }}-${{ hashFiles('tools/wasm/host-tools.sh', 'tools/wasm/build-deps.sh') }}
+
+      - name: Build lemon + protoc
+        run: tools/wasm/host-tools.sh
+
+      - name: Put the host tools on PATH
+        run: |
+          set -euo pipefail
+          echo "$GITHUB_WORKSPACE/build/host-tools/bin" >> "$GITHUB_PATH"
+          {
+            echo "LEMON_EXE=$GITHUB_WORKSPACE/build/host-tools/bin/lemon"
+            echo "Protobuf_PROTOC_EXECUTABLE=$GITHUB_WORKSPACE/build/host-tools/bin/protoc"
+            # configure.sh's default is `brew --prefix glm`; on Linux the headers are in /usr.
+            echo "GLM_PREFIX=/usr"
+          } >> "$GITHUB_ENV"
+
+      # ------------------------------------------------------------------ wasm dependencies
+      # ~30 minutes from clean: abseil, protobuf, zstd, wxWidgets base-only, plus the
+      # emscripten ports (freetype/harfbuzz/zlib/boost) that land in EM_CACHE.  The stage
+      # stamps inside build/wasm-deps make the script a no-op on a cache hit; it still runs so
+      # a partial cache is completed rather than trusted.
+      - name: Cache the wasm dependency prefix
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/wasm-deps
+            ${{ env.EM_CACHE }}
+          key: wasm-deps-${{ runner.os }}-em${{ env.EMSDK_VERSION }}-${{ hashFiles('tools/wasm/build-deps.sh', 'tools/wasm/env.sh', 'tools/wasm/patches/**') }}
+          restore-keys: |
+            wasm-deps-${{ runner.os }}-em${{ env.EMSDK_VERSION }}-
+
+      - name: Build the wasm dependencies
+        run: |
+          set -euo pipefail
+          JOBS="$(nproc)" tools/wasm/build-deps.sh
+
+      # find_package( Freetype ) is given an explicit path to the -legacysjlj variant of the
+      # port (see configure.sh), which only exists once something has linked with the port
+      # flags.  build-deps.sh's smoke test does that, but link it here too so a `--skip smoke`
+      # or a partially restored cache cannot leave the file missing.
+      - name: Warm the emscripten ports
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source tools/wasm/env.sh
+          tmp="$(mktemp -d)"
+          echo 'int main(void){return 0;}' > "$tmp/port-warm.c"
+          # shellcheck disable=SC2086
+          emcc $WASM_CFLAGS $WASM_LDFLAGS "$tmp/port-warm.c" -o "$tmp/port-warm.js"
+          find "$(em-config CACHE)/sysroot/lib/wasm32-emscripten" -maxdepth 1 -name 'libfreetype*' -exec ls -l {} +
+
+      # ------------------------------------------------------------------ the module
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-wasm-${{ runner.os }}-em${{ env.EMSDK_VERSION }}-${{ github.sha }}
+          restore-keys: |
+            ccache-wasm-${{ runner.os }}-em${{ env.EMSDK_VERSION }}-
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          ccache --zero-stats || true
+          tools/wasm/configure.sh \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build kicad_api
+        run: |
+          set -euo pipefail
+          ninja -C build/wasm -j "$(nproc)" kicad_api
+          ccache --show-stats || true
+
+      # ------------------------------------------------------------------ package
+      - name: Package
+        id: package
+        env:
+          TAG: ${{ steps.ref.outputs.tag }}
+        run: tools/wasm/package.sh
+
+      - name: Show the manifest
+        run: cat build/wasm-release/kicad-wasm.json
+
+      # Uploaded on every run, tag or not: a dispatch build is how you get a module without
+      # cutting a release.  Retention is the repository default.
+      - name: Upload the run artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.asset }}
+          path: |
+            build/wasm-release/${{ steps.package.outputs.asset }}
+            build/wasm-release/kicad-wasm.json
+          if-no-files-found: error
+
+      # ------------------------------------------------------------------ release
+      # Only on a real tag.  `gh` is preinstalled on the runner; the release is created with
+      # generated notes if it does not exist yet, and the asset is clobbered on a re-run.
+      - name: Attach to the GitHub Release
+        if: ${{ steps.ref.outputs.tag != '' && (github.event_name == 'push' || github.event.inputs.attach_to_release == 'true') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ref.outputs.tag }}
+          ASSET: ${{ steps.package.outputs.asset }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/notes.md"
+          {
+            echo "KiCad's headless API core built for wasm32-emscripten."
+            echo
+            echo "\`$ASSET\` contains \`kicad_api.js\`, \`kicad_api.wasm\`, \`kicad-wasm.json\`"
+            echo "(fork commit, toolchain and dependency versions, sizes) and \`SHA256SUMS\`."
+            echo
+            echo "Consume it from fab_pcb without the toolchain:"
+            echo
+            echo "    KICAD_WASM_RELEASE=$TAG bun run --filter @fp-pcb/kicad-wasm fetch:release"
+          } > "$notes"
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --notes-file "$notes" --verify-tag
+          fi
+          gh release upload "$TAG" "build/wasm-release/$ASSET" --clobber
+          gh release view "$TAG" --json assets --jq '.assets[].name'
