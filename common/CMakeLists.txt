@@ -536,6 +536,13 @@ if( KICAD_HEADLESS_API )
     list( REMOVE_ITEM KICOMMON_SRCS ${KICOMMON_GUI_SRCS} ${KICOMMON_NET_SRCS}
                                     ${KICOMMON_VCS_SRCS} )
 
+    # There is no system font database to query, so the fontconfig wrapper is replaced by one
+    # that reads a manifest (or a plain folder of font files) out of KICAD_FONTS_DIR.  With no
+    # fonts mounted it misses every lookup, which is what OUTLINE_FONT::LoadFont() reads as
+    # "fall back to the stroke font".
+    list( REMOVE_ITEM KICOMMON_SRCS font/fontconfig.cpp )
+    list( APPEND KICOMMON_SRCS font/fontconfig_manifest.cpp )
+
     # Headless spellings of the few free functions the API path calls that happen to live in
     # confirm.cpp and widgets/ui_common.cpp.
     list( APPEND KICOMMON_SRCS headless/headless_gui.cpp headless/vcs_stub.cpp )
