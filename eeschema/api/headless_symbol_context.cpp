@@ -19,6 +19,7 @@
 
 #include <api/headless_symbol_context.h>
 
+#include <ki_exception.h>       // IO_ERROR; a GUI wx header chain used to drag this in
 #include <lib_symbol.h>
 #include <libraries/symbol_library_adapter.h>
 #include <project.h>

@@ -1055,6 +1055,42 @@ message(STATUS "wxUSE_GLCANVAS_EGL=${wxWidgets_GLCANVAS_EGL}")
 message(STATUS "wxHAS_GLX=${wxWidgets_HAS_GLX}")
 message(STATUS "wxHAS_EGL=${wxWidgets_HAS_EGL}")
 
+# The headless API core is meant to link against wxBase alone, because that is all an
+# Emscripten build has.  Narrowing the native link line here means the native gate discovers
+# exactly the wxCore surface the wasm build will have to shim.  Headers are untouched: KiCad's
+# sources include wx/window.h and friends from blocks that are compiled out anyway.
+option( KICAD_HEADLESS_ALLOW_UNDEFINED
+    "Let the headless host link with the GUI symbols its kept sources still reference"
+    ON )
+
+# Default ON: wxBase is all an Emscripten build has, so the native gate links the same
+# way.  The wxCore surface the kept sources still reference is served by
+# host/wx_headless (real headless value types) plus the generated abort stubs in
+# host/headless_link_stubs.cpp.  Turn it off to link against the toolkit again, which is
+# occasionally useful when bisecting a link failure.
+option( KICAD_HEADLESS_WX_BASE_ONLY
+    "Link the headless API core against wxBase only (as the Emscripten build must)"
+    ON )
+
+if( KICAD_HEADLESS_API AND NOT EMSCRIPTEN AND KICAD_HEADLESS_WX_BASE_ONLY )
+    # Drop the toolkit halves of wx from the link line and keep everything else (the -L, the
+    # macOS frameworks, wxBase and wxXML) exactly as FindwxWidgets produced it.  Re-deriving
+    # the line from wx-config does not work: --libs base,xml returns "-framework Carbon" pairs
+    # that separate_arguments splits and the generator then re-emits as -framework -lCarbon.
+    set( _wx_base_libs )
+
+    foreach( _wx_lib ${wxWidgets_LIBRARIES} )
+        if( _wx_lib MATCHES "wx_(osx|msw|gtk[0-9]*|qt)[a-z0-9_]*_" OR _wx_lib MATCHES "wx_baseu_net" )
+            continue()
+        endif()
+
+        list( APPEND _wx_base_libs ${_wx_lib} )
+    endforeach()
+
+    set( wxWidgets_LIBRARIES ${_wx_base_libs} )
+    message( STATUS "Headless API core links wxBase only: ${wxWidgets_LIBRARIES}" )
+endif()
+
 # Find OpenGL with GLU (the headless core builds no GAL renderers)
 if( NOT KICAD_HEADLESS_API )
     find_package( OpenGL REQUIRED )
@@ -1171,6 +1207,7 @@ if( KICAD_HEADLESS_API )
     add_subdirectory( common )
     add_subdirectory( eeschema )
     add_subdirectory( pcbnew )
+    add_subdirectory( host )
 else()
 add_subdirectory( api )
 add_subdirectory( resources )

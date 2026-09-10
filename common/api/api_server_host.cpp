@@ -37,6 +37,7 @@
 #include <wildcards_and_files_ext.h>
 #include <wx/dir.h>
 #include <wx/ffile.h>
+#include <wx/log.h>            // wxLogTrace; a GUI-enabled wx pulls this in transitively
 #include <wx/filename.h>
 
 #include <../eeschema/sch_file_versions.h>                     // for SEXPR_SCHEMATIC_FILE_VERSION def
