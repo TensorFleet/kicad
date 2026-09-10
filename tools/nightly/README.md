@@ -126,7 +126,8 @@ All of it runs by hand too, e.g. on Linux:
 sudo tools/nightly/linux/install-deps.sh
 BUILD_DIR=build/nightly tools/nightly/linux/build.sh
 python3 tools/nightly/linux/bundle.py --build-dir build/nightly --out dist/kicad-cli
-tools/nightly/linux/smoke-container.sh dist/kicad-cli        # needs docker
+tools/nightly/linux/smoke-container.sh dist/kicad-cli        # needs docker (a debootstrap chroot with
+                                                            # runtime-packages.txt works the same way)
 tools/nightly/archive.sh dist/kicad-cli linux-x86_64 nightly-$(date +%Y%m%d)-$(git rev-parse --short=10 HEAD) out
 ```
 
@@ -140,7 +141,8 @@ build step fails with a message saying so, the other platforms publish normally,
 rolling release simply has no Windows asset yet. After that, cached ports restore in
 minutes and a Windows build is about an hour.
 
-Linux builds in roughly an hour, macOS in one to two (the Apple-silicon runners have three
-cores); `ccache` is kept on the Actions cache for both. The repository is public, so the
+A cold Linux build takes about 95 minutes on the 4-core runner (measured), macOS one to
+two hours (the Apple-silicon runners have three cores); `ccache` is saved to the Actions
+cache right after the compile, so a failure in a later step does not lose it. The repository is public, so the
 standard runners are free; a `linux-arm64` row on `ubuntu-24.04-arm` would work as is if
 ARM Linux hosts become a target.
