@@ -288,6 +288,8 @@ set( PCBNEW_EXPORTERS
     exporters/u3d/context_manager.cpp
     exporters/u3d/data_block.cpp
     exporters/u3d/writer.cpp
+    exporters/export_ipc2581.cpp
+    exporters/export_odbpp.cpp
     exporters/exporter_vrml.cpp
     exporters/place_file_exporter.cpp
     exporters/gendrill_excellon_writer.cpp

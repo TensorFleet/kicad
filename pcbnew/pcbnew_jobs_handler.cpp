@@ -119,6 +119,8 @@
 #include <settings/settings_manager.h>
 #include <dialogs/dialog_gendrill.h>
 #include <dialogs/dialog_gen_footprint_position.h>
+#include <exporters/export_ipc2581.h>
+#include <exporters/export_odbpp.h>
 #include <dialogs/dialog_export_2581.h>
 #include <dialogs/dialog_export_odbpp.h>
 #include <dialogs/dialog_export_step.h>
@@ -3170,7 +3172,7 @@ int PCBNEW_JOBS_HANDLER::JobExportIpc2581( JOB* aJob )
         return CLI::EXIT_CODES::ERR_INVALID_OUTPUT_CONFLICT;
     }
 
-    if( !DIALOG_EXPORT_2581::GenerateFile( *job, brd, m_progressReporter, m_reporter ) )
+    if( !ExportBoardToIpc2581( *job, brd, m_progressReporter, m_reporter ) )
         return CLI::EXIT_CODES::ERR_UNKNOWN;
 
     return CLI::EXIT_CODES::SUCCESS;
@@ -3330,7 +3332,7 @@ int PCBNEW_JOBS_HANDLER::JobExportOdb( JOB* aJob )
         toolManager->GetTool<ZONE_FILLER_TOOL>()->FillAllZones( nullptr, m_progressReporter, true );
     }
 
-    DIALOG_EXPORT_ODBPP::GenerateODBPPFiles( *job, brd, nullptr, m_progressReporter, m_reporter );
+    ExportBoardToOdbpp( *job, brd, nullptr, m_progressReporter, m_reporter );
     aJob->AddOutput( outPath );
 
     if( m_reporter->HasMessageOfSeverity( RPT_SEVERITY_ERROR ) )
