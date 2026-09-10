@@ -116,9 +116,9 @@ wxDEFINE_EVENT( API_REQUEST_EVENT, wxCommandEvent );
 
 KICAD_API_SERVER::KICAD_API_SERVER( bool aAutoStart ) :
         wxEvtHandler(),
+        m_eventSequence( 0 ),
         m_serverHandler( std::make_unique<API_HANDLER_SERVER>( this ) ),
         m_fallbackHandler( std::make_unique<API_HANDLER_FALLBACK>() ),
-        m_eventSequence( 0 ),
         m_token( KIID().AsStdString() ),
         m_readyToReply( false ),
         m_requestPending( false )
