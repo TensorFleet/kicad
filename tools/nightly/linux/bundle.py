@@ -86,10 +86,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build-dir", required=True)
     ap.add_argument("--out", required=True, help="staging directory to create (e.g. dist/kicad-cli)")
-    ap.add_argument("--src", default=None, help="source tree (default: derived from this script)")
+    ap.add_argument("--src", default=None, help="source tree (default: $KICAD_SRC, else the tree this script lives in)")
     args = ap.parse_args()
 
-    src = args.src or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    src = args.src or os.environ.get("KICAD_SRC") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
     build = os.path.abspath(args.build_dir)
     out = os.path.abspath(args.out)
     bin_dir, lib_dir, share = (os.path.join(out, d) for d in ("bin", "lib", "share/kicad"))

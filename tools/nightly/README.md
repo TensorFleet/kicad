@@ -8,14 +8,43 @@ repository:
 
 | Release | What it is |
 |---|---|
-| `nightly-<YYYYMMDD>-<sha10>` | one prerelease per build; pin to it. The oldest are pruned (`KEEP_NIGHTLIES`, 14) |
+| `nightly-<YYYYMMDD>-<sha10>` | one prerelease per build; pin to it. Kept for at least 90 days (`KEEP_DAYS`), see the contract below |
 | `nightly` | rolling prerelease: the latest build of every platform under stable asset names |
 
 The schedule fires from the default branch (`master`) and builds `web-api`, the branch
-fab_pcb pins; the workflow file therefore has to be on `master`, the scripts on the branch
-being built. A build is skipped when the rolling release already carries that branch's head
-for every platform, so an idle branch costs one short job a night. `workflow_dispatch` takes
-a `ref`, a `force` flag and a `platforms` subset.
+fab_pcb pins. Every job checks out two things: the sources to build at the workspace root,
+and `tools/nightly` of the commit the workflow file came from in `nightly-tools/`, and only
+ever runs the scripts from the latter. So the workflow file has to be on `master`, but the
+ref being built can be anything, including a commit from before this pipeline existed. A
+build is skipped when the rolling release already carries that branch's head for every
+platform, so an idle branch costs one short job a night. `workflow_dispatch` takes a `ref`,
+a `force` flag and a `platforms` subset:
+
+```bash
+# publish a Linux build for a commit a consumer has pinned (any commit on any branch)
+gh workflow run nightly.yml --repo TensorFleet/kicad --ref master \
+  -f ref=<commit> -f force=true -f platforms=linux-x86_64
+```
+
+## Consumer contract
+
+fab_pcb's CI (and fabdesk) depend on these releases; the following is kept stable, and a
+change to any of it is announced to the consumers first:
+
+1. **Dated tags are `nightly-<YYYYMMDD>-<sha10>`**, `sha10` being the first ten characters
+   of the commit built. The `-<sha10>` suffix is the lookup key a consumer uses to find the
+   build of a pinned commit (the date is the build date, so it may be later than the commit).
+2. **Every dated release carries `manifest.json`** with `schema: 1` in the format below, one
+   entry per platform that built, each with `file`, `url`, `sha256`, `size` and `entrypoint`.
+   A dated release only contains the platforms that built that night.
+3. **Archives unpack into `kicad-cli/`** and the executable is at the manifest's `entrypoint`.
+4. **Retention: a dated release stays for at least `KEEP_DAYS` (90) days** after it was
+   published; pruning is by age only, never by count, so it does not depend on how often
+   the branch changes. A consumer that pins a commit must therefore repin, or re-dispatch a
+   build for its pin with the command above, within 90 days. Nothing ever deletes the
+   rolling `nightly` release.
+5. **`linux/runtime-packages.txt` stays at `tools/nightly/linux/runtime-packages.txt`** in
+   this repository; consumers install that list rather than keeping a copy.
 
 ## Assets
 
@@ -115,10 +144,10 @@ Runtime requirements:
 | `manifest.py` | `build` / `is-current` / `notes` for manifest.json |
 | `archive.sh` | `kicad-cli/` staging tree → tar.gz / zip |
 | `smoke.sh` | `version`, a DRC and an ERC through the kifaces, on files from `qa/data` |
-| `release.sh` | dated + rolling releases, tag move, pruning (`gh`) |
+| `release.sh` | dated + rolling releases, tag move, pruning by age (`gh`) |
 | `linux/install-deps.sh`, `build.sh`, `bundle.py`, `smoke-container.sh`, `runtime-packages.txt` | Ubuntu build; `bundle.py` walks DT_NEEDED and copies every non-platform library, `patchelf`s RUNPATHs |
 | `macos/install-deps.sh`, `build.sh`, `bundle.sh` | Homebrew build (same flags as fab_pcb's `build-macos.sh`); `bundle.sh` walks `otool -L`, rewrites load commands to `@rpath`, re-signs |
-| `windows/setup-vcpkg.ps1`, `install-deps.ps1`, `build.ps1`, `bundle.ps1`, `triplets/` | vcpkg at the manifest's baseline with a files binary cache on the Actions cache; the overlay triplet builds release-only ports |
+| `windows/setup-vcpkg.ps1`, `install-deps.ps1`, `build.ps1`, `bundle.ps1`, `import-check.ps1`, `triplets/` | vcpkg at the manifest's baseline with a files binary cache on the Actions cache; the overlay triplet builds release-only ports; `import-check.ps1` walks every static import with `dumpbin` (the `ldd` check's counterpart) |
 
 All of it runs by hand too, e.g. on Linux:
 

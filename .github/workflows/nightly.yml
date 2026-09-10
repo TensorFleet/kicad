@@ -1,14 +1,18 @@
 #
-# Nightly binaries of the headless server: `kicad-cli` + the pcbnew and eeschema kifaces,
-# for Linux, macOS and Windows, published as GitHub Releases of this repository.
+# Nightly binaries of the headless server: `kicad-cli` + the pcbnew, eeschema and cvpcb
+# kifaces, for Linux, macOS and Windows, published as GitHub Releases of this repository.
 #
-#   nightly-<YYYYMMDD>-<sha10>   one prerelease per build (pinnable; the oldest are pruned)
+#   nightly-<YYYYMMDD>-<sha10>   one prerelease per build (pinnable; pruned after KEEP_DAYS)
 #   nightly                      rolling prerelease that always carries the latest assets
 #                                under stable names, plus manifest.json for consumers
 #
+# Two checkouts per job: the *sources* to build (web-api by default, or the `ref` input,
+# which may be a commit from before this pipeline existed) at the workspace root, and the
+# *tooling* (tools/nightly of the commit this workflow file comes from) in nightly-tools/.
 # Everything platform-specific lives in tools/nightly/ so it can be run by hand; this file
 # only wires the jobs together.  See tools/nightly/README.md for the archive layout, the
-# manifest format and how a consumer (fabdesk, fab_pcb) pulls a build in.
+# manifest format, the consumer contract and how a consumer (fabdesk, fab_pcb) pulls a
+# build in.
 #
 name: Nightly kicad-cli
 
@@ -20,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Git ref to build (default: web-api, the branch fab_pcb pins)"
+        description: "Git ref to build (default: web-api, the branch fab_pcb pins); any commit works, even one older than tools/nightly"
         type: string
         default: ""
       force:
@@ -44,6 +48,12 @@ env:
   # The schedule fires from the default branch (master, an upstream mirror kept level with
   # web-api), but what fab_pcb and fabdesk pin is the API branch, so that is what gets built.
   NIGHTLY_REF: web-api
+  # Where the second checkout puts tools/nightly; scripts are run from here, never from the
+  # source checkout, so a commit that predates the pipeline can still be built.
+  NIGHTLY_TOOLS: ${{ github.workspace }}/nightly-tools/tools/nightly
+  KICAD_SRC: ${{ github.workspace }}
+  # Dated releases are kept at least this many days (the retention guarantee in the README).
+  KEEP_DAYS: "90"
 
 jobs:
   # ------------------------------------------------------------------ what to build
@@ -61,7 +71,8 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       platforms: ${{ steps.matrix.outputs.platforms }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the sources
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || env.NIGHTLY_REF }}
           # `git describe --match "[0-9]*"` (cmake/CreateGitVersionHeader.cmake) needs the
@@ -70,6 +81,13 @@ jobs:
           fetch-depth: 0
           filter: tree:0
           fetch-tags: true
+
+      - name: Check out the tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: nightly-tools
+          sparse-checkout: tools/nightly
 
       - name: Describe the commit
         id: info
@@ -93,7 +111,7 @@ jobs:
           REQUESTED: ${{ inputs.platforms }}
         run: |
           set -euo pipefail
-          bash tools/nightly/matrix.sh "$REQUESTED" | tee -a "$GITHUB_OUTPUT"
+          bash "$NIGHTLY_TOOLS/matrix.sh" "$REQUESTED" | tee -a "$GITHUB_OUTPUT"
 
       - name: Skip when the rolling release already carries this commit
         id: skip
@@ -107,7 +125,7 @@ jobs:
           set -euo pipefail
           skip=false
           if [ "$FORCE" != "true" ] && gh release download nightly --pattern manifest.json --output manifest.json 2>/dev/null; then
-            if python3 tools/nightly/manifest.py is-current manifest.json "$SHA" $PLATFORMS; then
+            if python3 "$NIGHTLY_TOOLS/manifest.py" is-current manifest.json "$SHA" $PLATFORMS; then
               echo "nightly already carries $SHA for: $PLATFORMS"
               skip=true
             fi
@@ -134,12 +152,20 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1G
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the sources
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
           filter: tree:0
           fetch-tags: true
+
+      - name: Check out the tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: nightly-tools
+          sparse-checkout: tools/nightly
 
       # ---- compiler cache (Linux, macOS).  Restored and saved as two steps so that a job
       # which fails after the compile (bundle, smoke test) still keeps the objects it built;
@@ -155,11 +181,11 @@ jobs:
       # ---- Linux
       - name: Install build dependencies (Linux)
         if: matrix.os == 'linux'
-        run: sudo bash tools/nightly/linux/install-deps.sh
+        run: sudo bash "$NIGHTLY_TOOLS/linux/install-deps.sh"
 
       - name: Build (Linux)
         if: matrix.os == 'linux'
-        run: bash tools/nightly/linux/build.sh
+        run: bash "$NIGHTLY_TOOLS/linux/build.sh"
 
       - name: Save ccache (Linux)
         if: matrix.os == 'linux' && always()
@@ -170,20 +196,20 @@ jobs:
 
       - name: Bundle (Linux)
         if: matrix.os == 'linux'
-        run: python3 tools/nightly/linux/bundle.py --build-dir "$BUILD_DIR" --out dist/kicad-cli
+        run: python3 "$NIGHTLY_TOOLS/linux/bundle.py" --build-dir "$BUILD_DIR" --src "$KICAD_SRC" --out dist/kicad-cli
 
       - name: Smoke test in a clean container (Linux)
         if: matrix.os == 'linux'
-        run: bash tools/nightly/linux/smoke-container.sh dist/kicad-cli
+        run: bash "$NIGHTLY_TOOLS/linux/smoke-container.sh" dist/kicad-cli
 
       # ---- macOS
       - name: Install build dependencies (macOS)
         if: matrix.os == 'macos'
-        run: bash tools/nightly/macos/install-deps.sh
+        run: bash "$NIGHTLY_TOOLS/macos/install-deps.sh"
 
       - name: Build (macOS)
         if: matrix.os == 'macos'
-        run: bash tools/nightly/macos/build.sh
+        run: bash "$NIGHTLY_TOOLS/macos/build.sh"
 
       - name: Save ccache (macOS)
         if: matrix.os == 'macos' && always()
@@ -194,7 +220,7 @@ jobs:
 
       - name: Bundle (macOS)
         if: matrix.os == 'macos'
-        run: bash tools/nightly/macos/bundle.sh "$BUILD_DIR" dist/kicad-cli
+        run: bash "$NIGHTLY_TOOLS/macos/bundle.sh" "$BUILD_DIR" dist/kicad-cli
 
       # ---- Windows
       - name: Set up MSVC (Windows)
@@ -206,7 +232,7 @@ jobs:
       - name: Set up vcpkg (Windows)
         if: matrix.os == 'windows'
         shell: pwsh
-        run: tools/nightly/windows/setup-vcpkg.ps1
+        run: '& "$env:NIGHTLY_TOOLS/windows/setup-vcpkg.ps1"'
 
       # vcpkg's binary cache (the built ports) lives on the Actions cache so a cold run only
       # happens once.  The install step below has its own timeout and does not fail the job:
@@ -218,7 +244,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/.vcpkg-cache
-          key: vcpkg-${{ matrix.platform }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/custom_vcpkg_triplets/**', 'tools/nightly/windows/triplets/**') }}
+          key: vcpkg-${{ matrix.platform }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/custom_vcpkg_triplets/**', 'nightly-tools/tools/nightly/windows/triplets/**') }}
           restore-keys: vcpkg-${{ matrix.platform }}-
 
       - name: Install vcpkg dependencies (Windows)
@@ -227,7 +253,7 @@ jobs:
         shell: pwsh
         timeout-minutes: 250
         continue-on-error: true
-        run: tools/nightly/windows/install-deps.ps1
+        run: '& "$env:NIGHTLY_TOOLS/windows/install-deps.ps1"'
 
       # A complete set of ports is saved under the exact key, so the next run with the same
       # vcpkg.json hits it and saves nothing; a partial set is saved under a per-run key that
@@ -256,22 +282,22 @@ jobs:
       - name: Build (Windows)
         if: matrix.os == 'windows'
         shell: pwsh
-        run: tools/nightly/windows/build.ps1
+        run: '& "$env:NIGHTLY_TOOLS/windows/build.ps1"'
 
       - name: Bundle (Windows)
         if: matrix.os == 'windows'
         shell: pwsh
-        run: tools/nightly/windows/bundle.ps1 -BuildDir "$env:BUILD_DIR" -Out dist/kicad-cli
+        run: '& "$env:NIGHTLY_TOOLS/windows/bundle.ps1" -BuildDir "$env:BUILD_DIR" -Out dist/kicad-cli'
 
       - name: Smoke test (Windows)
         if: matrix.os == 'windows'
         shell: bash
-        run: bash tools/nightly/smoke.sh dist/kicad-cli/bin/kicad-cli.exe .
+        run: bash "$NIGHTLY_TOOLS/smoke.sh" dist/kicad-cli/bin/kicad-cli.exe "$KICAD_SRC"
 
       # ---- archive + upload (all)
       - name: Archive
         shell: bash
-        run: bash tools/nightly/archive.sh dist/kicad-cli "$NIGHTLY_PLATFORM" "$NIGHTLY_TAG" out
+        run: bash "$NIGHTLY_TOOLS/archive.sh" dist/kicad-cli "$NIGHTLY_PLATFORM" "$NIGHTLY_TAG" out
 
       - uses: actions/upload-artifact@v4
         with:
@@ -291,9 +317,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the tooling
+        uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare.outputs.sha }}
+          ref: ${{ github.sha }}
+          path: nightly-tools
           sparse-checkout: tools/nightly
 
       - uses: actions/download-artifact@v4
@@ -312,8 +340,7 @@ jobs:
           NIGHTLY_DATE: ${{ needs.prepare.outputs.date }}
           NIGHTLY_PLATFORMS: ${{ needs.prepare.outputs.platforms }}
           NIGHTLY_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          KEEP_NIGHTLIES: "14"
-        run: bash tools/nightly/release.sh assets
+        run: bash "$NIGHTLY_TOOLS/release.sh" assets
 
       - name: Fail the run if a platform did not build
         if: needs.build.result != 'success'

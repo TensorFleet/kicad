@@ -13,12 +13,13 @@
 # all load commands are rewritten to @rpath/<name>, the rpaths point into Frameworks and
 # every Mach-O is re-signed ad hoc (a modified binary must be re-signed on Apple silicon).
 #
-# Usage: bundle.sh <build dir> <staging dir>
+# Usage: bundle.sh <build dir> <staging dir>     (KICAD_SRC: the source tree, default: this one)
 set -euo pipefail
 
 BUILD="$(cd "$1" && pwd)"
 OUT="$2"
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC="${KICAD_SRC:-$(cd "$HERE/../../.." && pwd)}"
 BREW="$(brew --prefix)"
 
 APP_SRC="$BUILD/kicad/KiCad.app"
@@ -139,4 +140,4 @@ echo "$sha" > "$OUT/KICAD_COMMIT"
 echo "$version" > "$OUT/VERSION"
 
 echo "staged $OUT: $(ls "$FW" | wc -l | tr -d ' ') libraries in Frameworks, $(du -sh "$OUT" | cut -f1)"
-bash "$SRC/tools/nightly/smoke.sh" "$OUT/kicad-cli" "$SRC"
+bash "$HERE/../smoke.sh" "$OUT/kicad-cli" "$SRC"

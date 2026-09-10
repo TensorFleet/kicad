@@ -2,10 +2,11 @@
 # Build kicad-cli + the pcbnew and eeschema kifaces on Linux with distro packages.
 # Same targets and CMake flags as fab_pcb's packages/kicad-patches (build-macos.sh, Dockerfile).
 #
-# Env: BUILD_DIR (default build/nightly), BUILD_TYPE (Release), JOBS (nproc)
+# Env: KICAD_SRC (default: the tree this script lives in), BUILD_DIR (default build/nightly),
+#      BUILD_TYPE (Release), JOBS (nproc)
 set -euo pipefail
 
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+SRC="${KICAD_SRC:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 BUILD_DIR="${BUILD_DIR:-$SRC/build/nightly}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 JOBS="${JOBS:-$(nproc)}"

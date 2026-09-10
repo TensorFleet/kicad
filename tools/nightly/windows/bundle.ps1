@@ -6,7 +6,8 @@
 #     bin\_pcbnew.dll  bin\_eeschema.dll      kifaces (KIFACE_SUFFIX is .dll on Windows);
 #     bin\_cvpcb.dll                          KIWAY loads them from the executable's directory;
 #                                            eeschema's ERC loads _cvpcb too
-#     bin\kicommon.dll kigal.dll kiapi.dll    KiCad's own shared libraries
+#     bin\ki*.dll                             KiCad's own shared libraries (kicommon, kigal,
+#                                            kiapi, kicad_3dsg)
 #     bin\*.dll                               every vcpkg runtime DLL + the MSVC runtime
 #     share\kicad\schemas  share\kicad\template   GetStockDataPath() = <exe dir>\..\share\kicad
 #     KICAD_COMMIT VERSION
@@ -18,7 +19,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
-$src = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
+$src = if ($env:KICAD_SRC) { (Resolve-Path $env:KICAD_SRC).Path } else { (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path }
 $BuildDir = (Resolve-Path $BuildDir).Path
 if (Test-Path $Out) { Remove-Item -Recurse -Force $Out }
 $bin = New-Item -ItemType Directory -Force -Path (Join-Path $Out "bin")
@@ -36,9 +37,19 @@ function Find-One([string]$name) {
     return $hits[0].FullName
 }
 
-foreach ($name in "kicad-cli.exe", "_pcbnew.dll", "_eeschema.dll", "_cvpcb.dll", "kicommon.dll", "kigal.dll", "kiapi.dll") {
+foreach ($name in "kicad-cli.exe", "_pcbnew.dll", "_eeschema.dll", "_cvpcb.dll") {
     Copy-Item (Find-One $name) $bin
 }
+
+# KiCad's own shared libraries: kicommon, kigal, kiapi and kicad_3dsg (3d-viewer/3d_cache/sg,
+# imported by _pcbnew).  Globbed like the Linux and macOS bundles do, so a new one cannot be
+# forgotten; the import check below fails the build if anything is still missing.
+$own = Get-ChildItem -Path $BuildDir -Recurse -File -Filter "ki*.dll" |
+    Where-Object { $_.FullName -notmatch '\\CMakeFiles\\' -and $_.FullName -notmatch '\\vcpkg_installed\\' } |
+    Group-Object Name | ForEach-Object { $_.Group | Sort-Object LastWriteTime -Descending | Select-Object -First 1 }
+if (-not $own) { throw "no ki*.dll under $BuildDir" }
+foreach ($dll in $own) { Copy-Item $dll.FullName $bin }
+Write-Host ("KiCad DLLs: {0}" -f (($own | ForEach-Object Name) -join ", "))
 
 # Dependencies: every release DLL vcpkg installed (a superset of what the three binaries
 # import, which keeps the walk out of this script) and the MSVC runtime from the toolset.
@@ -50,6 +61,11 @@ if ($env:VCToolsRedistDir) {
 } else {
     Write-Warning "VCToolsRedistDir is not set; the MSVC runtime is not bundled"
 }
+
+# Import check (the Windows counterpart of the `ldd | grep 'not found'` on Linux): every
+# static import of the executable, the kifaces and the DLLs must resolve in bin\ or System32.
+& (Join-Path $PSScriptRoot "import-check.ps1") -Bin $bin
+if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
 Copy-Item -Recurse (Join-Path $src "api\schemas") (Join-Path $share "schemas")
 Copy-Item -Recurse (Join-Path $src "resources\project_template") (Join-Path $share "template")
