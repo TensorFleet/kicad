@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Publish the nightly archives as GitHub Releases (run by .github/workflows/nightly.yml).
+#
+#   1. a pinnable prerelease `$NIGHTLY_TAG` (nightly-<date>-<sha10>) with the archives,
+#      SHA256SUMS and manifest.json
+#   2. the rolling prerelease `nightly`: the same archives under stable names
+#      (kicad-cli-<platform>.<ext>), a merged manifest.json that keeps the previous asset of
+#      any platform that did not build tonight, and the `nightly` tag moved to the commit
+#   3. prune dated nightlies beyond $KEEP_NIGHTLIES
+#
+# Usage: release.sh <dir with kicad-cli-<tag>-<platform>.* archives>
+# Env:   GH_TOKEN GH_REPO NIGHTLY_TAG NIGHTLY_SHA NIGHTLY_VERSION NIGHTLY_DATE
+#        NIGHTLY_PLATFORMS (requested, space separated) NIGHTLY_RUN_URL KEEP_NIGHTLIES
+set -euo pipefail
+
+ASSETS="$(cd "$1" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KEEP="${KEEP_NIGHTLIES:-14}"
+SHORT="${NIGHTLY_SHA:0:10}"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+shopt -s nullglob
+archives=("$ASSETS"/kicad-cli-"$NIGHTLY_TAG"-*.tar.gz "$ASSETS"/kicad-cli-"$NIGHTLY_TAG"-*.zip)
+if [ ${#archives[@]} -eq 0 ]; then
+  echo "::error::no archives for $NIGHTLY_TAG in $ASSETS (every platform failed?)"
+  exit 1
+fi
+echo "archives:"; printf '  %s\n' "${archives[@]##*/}"
+
+manifest() {
+  python3 "$HERE/manifest.py" build --assets-dir "$ASSETS" --repo "$GH_REPO" \
+    --tag "$NIGHTLY_TAG" --sha "$NIGHTLY_SHA" --version "$NIGHTLY_VERSION" --date "$NIGHTLY_DATE" \
+    --run-url "${NIGHTLY_RUN_URL:-}" "$@"
+}
+
+release_exists() { gh release view "$1" --json tagName >/dev/null 2>&1; }
+
+# ------------------------------------------------------------------ 1. dated release
+DATED="$WORK/dated"
+mkdir -p "$DATED"
+cp "${archives[@]}" "$DATED/"
+(cd "$DATED" && sha256sum -- * > SHA256SUMS)
+manifest --release-tag "$NIGHTLY_TAG" --out "$DATED/manifest.json"
+python3 "$HERE/manifest.py" notes "$DATED/manifest.json" > "$WORK/dated-notes.md"
+
+title="kicad-cli nightly $NIGHTLY_DATE ($SHORT)"
+if release_exists "$NIGHTLY_TAG"; then
+  # Re-run of the same commit on the same day: replace the assets.
+  gh release upload "$NIGHTLY_TAG" --clobber "$DATED"/*
+  gh release edit "$NIGHTLY_TAG" --prerelease --title "$title" --notes-file "$WORK/dated-notes.md"
+else
+  gh release create "$NIGHTLY_TAG" --prerelease --target "$NIGHTLY_SHA" \
+    --title "$title" --notes-file "$WORK/dated-notes.md" "$DATED"/*
+fi
+echo "published $NIGHTLY_TAG"
+
+# ------------------------------------------------------------------ 2. rolling release
+ROLLING="$WORK/rolling"
+mkdir -p "$ROLLING"
+for a in "${archives[@]}"; do
+  name="$(basename "$a")"
+  cp "$a" "$ROLLING/${name/-$NIGHTLY_TAG-/-}"   # kicad-cli-<tag>-<platform>.ext -> kicad-cli-<platform>.ext
+done
+
+previous="$WORK/previous-manifest.json"
+if release_exists nightly; then
+  gh release download nightly --pattern manifest.json --output "$previous" 2>/dev/null || true
+fi
+manifest --release-tag nightly --stable-names --merge "$previous" --out "$ROLLING/manifest.json"
+
+# SHA256SUMS of the rolling release covers every listed asset, tonight's and the kept ones.
+python3 - "$ROLLING/manifest.json" > "$ROLLING/SHA256SUMS" <<'EOF'
+import json, sys
+m = json.load(open(sys.argv[1]))
+for a in m["assets"].values():
+    print(f"{a['sha256']}  {a['file']}")
+EOF
+python3 "$HERE/manifest.py" notes "$ROLLING/manifest.json" > "$WORK/rolling-notes.md"
+
+rolling_title="kicad-cli nightly (latest: $NIGHTLY_DATE, $SHORT)"
+if release_exists nightly; then
+  gh release upload nightly --clobber "$ROLLING"/*
+  gh release edit nightly --prerelease --title "$rolling_title" --notes-file "$WORK/rolling-notes.md"
+  # Move the tag; `gh release edit --target` only applies to releases whose tag does not exist yet.
+  gh api -X PATCH "repos/$GH_REPO/git/refs/tags/nightly" -f sha="$NIGHTLY_SHA" -F force=true >/dev/null
+else
+  gh release create nightly --prerelease --target "$NIGHTLY_SHA" \
+    --title "$rolling_title" --notes-file "$WORK/rolling-notes.md" "$ROLLING"/*
+fi
+echo "updated rolling release nightly -> $NIGHTLY_SHA"
+
+# ------------------------------------------------------------------ 3. prune
+gh release list --limit 200 --json tagName,createdAt \
+  --jq '[.[] | select(.tagName | startswith("nightly-"))] | sort_by(.createdAt) | reverse | .[]?.tagName' \
+  | tail -n +"$((KEEP + 1))" | while read -r old; do
+      [ -n "$old" ] || continue
+      echo "pruning $old"
+      gh release delete "$old" --cleanup-tag --yes
+    done
+
+{
+  echo "### kicad-cli nightly"
+  echo
+  echo "- release: https://github.com/$GH_REPO/releases/tag/$NIGHTLY_TAG"
+  echo "- rolling: https://github.com/$GH_REPO/releases/tag/nightly"
+  echo
+  cat "$WORK/rolling-notes.md"
+} >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
