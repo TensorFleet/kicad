@@ -51,7 +51,9 @@ target_link_libraries( kicad_api_host
         ${wxWidgets_LIBRARIES}
     )
 
-if( NOT EMSCRIPTEN )
+if( EMSCRIPTEN )
+    add_subdirectory( wasm )
+else()
     add_executable( kicad-api-host-native
         main_native.cpp
         )

@@ -180,6 +180,14 @@ KICAD_API_HOST_CONFIG KICAD_API_HOST_CONFIG::Defaults()
 {
     KICAD_API_HOST_CONFIG config;
 
+#ifdef __EMSCRIPTEN__
+    // MEMFS has no notion of the user's home or of an installed share tree, so the module has to
+    // be told where the loader mounted them.  A native build resolves both the normal way.
+    config.home = "/home/kicad";
+    config.share = "/kicad/share";
+    config.fonts = "/kicad/fonts";
+#endif
+
     return config;
 }
 
