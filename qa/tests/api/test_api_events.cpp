@@ -49,6 +49,7 @@
 #include <pcb_track.h>
 #include <settings/settings_manager.h>
 #include <wx/filename.h>
+#include <wx/ffile.h>
 
 
 namespace
@@ -376,6 +377,57 @@ BOOST_AUTO_TEST_CASE( ReplacedItemsAreReportedAsUpdated )
     BOOST_CHECK_EQUAL( changed->document_changed().deleted_size(), 0 );
 
     m_server.DeregisterHandler( handler.get() );
+    m_server.Stop();
+}
+
+
+BOOST_AUTO_TEST_CASE( ImportNetlistPublishesDocumentChanged )
+{
+    loadBoard( wxS( "issue5830" ) );
+
+    std::unique_ptr<EVENT_SUBSCRIBER> subscriber = startAndSubscribe();
+    auto handler = std::make_unique<API_HANDLER_PCB>( m_context );
+    m_server.RegisterHandler( handler.get() );
+    BOOST_REQUIRE( receiveKind( *subscriber, Event::kDocumentOpened ).has_value() );
+
+    wxString netlistPath = wxFileName::CreateTempFileName( "qa-api-import" );
+    {
+        wxFFile netlist( netlistPath, wxS( "w" ) );
+        BOOST_REQUIRE( netlist.IsOpened() );
+        BOOST_REQUIRE( netlist.Write(
+                wxS( "(export (version \"E\")\n"
+                     "  (components\n"
+                     "    (comp (ref \"R1\") (value \"event-test\")\n"
+                     "      (footprint \"Resistor_SMD:R_0603_1608Metric\")\n"
+                     "      (tstamps \"00000000-0000-0000-0000-000000000001\")))\n"
+                     "  (nets))\n" ) ) );
+    }
+
+    kiapi::board::commands::ImportNetlist command;
+    *command.mutable_board() = pcbDocument();
+    command.set_netlist_path( netlistPath.ToStdString() );
+    command.set_match_mode( kiapi::board::commands::NMM_REFERENCE );
+    command.set_update_footprints( false );
+    command.set_delete_extra_footprints( false );
+
+    kiapi::common::ApiRequest request = makeRequest( command );
+    API_RESULT result = handler->Handle( request );
+    BOOST_REQUIRE( result.has_value() );
+
+    kiapi::board::commands::ImportNetlistResponse response;
+    BOOST_REQUIRE( result->message().UnpackTo( &response ) );
+    BOOST_CHECK_EQUAL( response.error_count(), 0 );
+
+    std::optional<Event> changed = receiveKind( *subscriber, Event::kDocumentChanged );
+    BOOST_REQUIRE( changed.has_value() );
+    BOOST_CHECK_EQUAL( changed->document_changed().revision(), 1u );
+    BOOST_CHECK_EQUAL( changed->document_changed().client_name(), "kicad.qa.events" );
+    BOOST_CHECK_EQUAL( changed->document_changed().message(), "Update Netlist" );
+    BOOST_CHECK_EQUAL( changed->document_changed().document().board_filename(), pcbDocument().board_filename() );
+
+    m_server.DeregisterHandler( handler.get() );
+    m_server.Stop();
+    wxRemoveFile( netlistPath );
 }
 
 
@@ -403,6 +455,7 @@ BOOST_AUTO_TEST_CASE( VariantChangesPublishProjectChanged )
     BOOST_CHECK_EQUAL( projectChanged->project_changed().client_name(), "kicad.qa.events" );
 
     m_server.DeregisterHandler( handler.get() );
+    m_server.Stop();
 }
 
 

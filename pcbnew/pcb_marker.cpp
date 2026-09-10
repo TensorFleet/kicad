@@ -142,7 +142,9 @@ static void ToProto( kiapi::board::DrcMarker& aMsg, const PCB_MARKER& aMarker )
     {
         PCB_LAYER_ID layer = aMarker.GetLayer();
 
-        if( layer == UNDEFINED_LAYER )
+        // Some DRC providers use an overlay/GAL layer for the marker.  The API field accepts only
+        // physical board layers, so keep the historical F.Cu fallback for any non-board value.
+        if( !IsPcbLayer( layer ) )
             layer = F_Cu;
 
         aMsg.set_layer( ToProtoEnum<PCB_LAYER_ID, kiapi::board::types::BoardLayer>( layer ) );
