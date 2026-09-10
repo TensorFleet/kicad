@@ -136,7 +136,11 @@ public:
         return *m_notifications_manager;
     }
 
+#ifndef KICAD_HEADLESS_API
+    /// The out-of-process API plugins are not part of the headless core; every caller
+    /// of this is a frame, a toolbar or a preferences panel.
     virtual API_PLUGIN_MANAGER& GetPluginManager() const { return *m_plugin_manager; }
+#endif
 
     KICAD_API_SERVER& GetApiServer() { return *m_api_server; }
 
@@ -407,7 +411,9 @@ protected:
     std::unique_ptr<BACKGROUND_JOBS_MONITOR> m_background_jobs_monitor;
     std::unique_ptr<NOTIFICATIONS_MANAGER> m_notifications_manager;
 
+#ifndef KICAD_HEADLESS_API
     std::unique_ptr<API_PLUGIN_MANAGER> m_plugin_manager;
+#endif
     std::unique_ptr<KICAD_API_SERVER> m_api_server;
 
     wxString        m_kicad_env;              ///< The KICAD system environment variable.

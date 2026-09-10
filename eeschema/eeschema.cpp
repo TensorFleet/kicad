@@ -41,9 +41,11 @@
 #include "eeschema_helpers.h"
 #include <diff_merge/diff_doc_kind.h>
 #include <reporter.h>
+#ifndef KICAD_HEADLESS_API
 #include "git/kigit_sch_merge.h"
 #include "git/kigit_sym_lib_merge.h"
 #include <git/kigit_driver_registry.h>
+#endif
 #include <eeschema_settings.h>
 #include <sch_edit_frame.h>
 #include <libraries/symbol_library_adapter.h>
@@ -574,8 +576,10 @@ bool IFACE::OnKifaceStart( PGM_BASE* aProgram, int aCtlBits, KIWAY* aKiway )
     // Register the schematic and symbol-library merge drivers with libgit2 so
     // `.gitattributes` entries `merge=kicad-sch` and `merge=kicad-sym-lib`
     // route through KiCad-aware merge logic.
+#ifndef KICAD_HEADLESS_API
     KIGIT::RegisterMergeDriver( "kicad-sch",     &KIGIT_SCH_MERGE::Apply );
     KIGIT::RegisterMergeDriver( "kicad-sym-lib", &KIGIT_SYM_LIB_MERGE::Apply );
+#endif
 
     return true;
 }

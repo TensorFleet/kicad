@@ -33,7 +33,9 @@
 #include <api/api_server.h>
 #include <ki_exception.h>
 #include <kiid.h>
+#ifndef KICAD_HEADLESS_API
 #include <kinng.h>
+#endif
 #include <paths.h>
 #include <pgm_base.h>
 #include <settings/common_settings.h>
@@ -42,7 +44,7 @@
 #include <api/common/commands/editor_commands.pb.h>
 #include <api/common/envelope.pb.h>
 
-#ifdef __UNIX__
+#if defined( __UNIX__ ) && !defined( KICAD_HEADLESS_API )
 #include <sys/file.h>
 #endif
 
@@ -229,6 +231,17 @@ std::string KICAD_API_SERVER::EventsUrlFor( const std::string& aRequestUrl )
 }
 
 
+#ifdef KICAD_HEADLESS_API
+
+// The headless API core has no socket transport at all (nng is not part of the wasm
+// dependency set).  A host reaches Dispatch()/DispatchBytes() through StartInProcess.
+void KICAD_API_SERVER::Start()
+{
+    wxLogTrace( traceApi, "Server: this build has no socket transport; use StartInProcess" );
+}
+
+#else
+
 void KICAD_API_SERVER::Start()
 {
     if( Running() )
@@ -368,6 +381,8 @@ void KICAD_API_SERVER::Start()
     Bind( API_REQUEST_EVENT, &KICAD_API_SERVER::handleApiEvent, this );
 }
 
+#endif // KICAD_HEADLESS_API
+
 
 void KICAD_API_SERVER::StartInProcess( EVENT_SINK aSink, const std::string& aRequestUrl,
                                        const std::string& aEventsUrl )
@@ -419,6 +434,7 @@ void KICAD_API_SERVER::Stop()
         return;
     }
 
+#ifndef KICAD_HEADLESS_API
     Unbind( API_REQUEST_EVENT, &KICAD_API_SERVER::handleApiEvent, this );
 
     if( m_publisher )
@@ -433,6 +449,7 @@ void KICAD_API_SERVER::Stop()
 
     m_server->Stop();
     m_server.reset( nullptr );
+#endif
 
     // Release anyone blocked in WaitForRequest
     m_wakeCondition.notify_all();
@@ -441,7 +458,11 @@ void KICAD_API_SERVER::Stop()
 
 bool KICAD_API_SERVER::Running() const
 {
+#ifdef KICAD_HEADLESS_API
+    return m_inProcess;
+#else
     return m_inProcess || ( m_server && m_server->Running() );
+#endif
 }
 
 
@@ -500,8 +521,13 @@ GetServerInfoResponse KICAD_API_SERVER::ServerInfo() const
 
 bool KICAD_API_SERVER::Publish( kiapi::common::events::Event aEvent )
 {
+#ifdef KICAD_HEADLESS_API
+    if( !m_eventSink )
+        return false;
+#else
     if( !m_publisher && !m_eventSink )
         return false;
+#endif
 
     aEvent.set_sequence( m_eventSequence.fetch_add( 1, std::memory_order_acq_rel ) + 1 );
 
@@ -515,7 +541,11 @@ bool KICAD_API_SERVER::Publish( kiapi::common::events::Event aEvent )
         return true;
     }
 
+#ifdef KICAD_HEADLESS_API
+    return false;
+#else
     return m_publisher->Publish( aEvent.SerializeAsString() );
+#endif
 }
 
 
@@ -562,7 +592,11 @@ std::string KICAD_API_SERVER::SocketPath() const
     if( m_inProcess )
         return m_inProcessRequestUrl;
 
+#ifdef KICAD_HEADLESS_API
+    return "";
+#else
     return m_server ? m_server->SocketPath() : "";
+#endif
 }
 
 
@@ -571,9 +605,15 @@ std::string KICAD_API_SERVER::EventsSocketPath() const
     if( m_inProcess )
         return m_inProcessEventsUrl;
 
+#ifdef KICAD_HEADLESS_API
+    return "";
+#else
     return m_publisher ? m_publisher->SocketPath() : "";
+#endif
 }
 
+
+#ifndef KICAD_HEADLESS_API
 
 void KICAD_API_SERVER::onApiRequest( std::string* aRequest )
 {
@@ -605,6 +645,9 @@ void KICAD_API_SERVER::onApiRequest( std::string* aRequest )
 }
 
 
+#endif // KICAD_HEADLESS_API
+
+
 bool KICAD_API_SERVER::WaitForRequest( std::chrono::milliseconds aTimeout )
 {
     std::unique_lock<std::mutex> lock( m_wakeMutex );
@@ -615,6 +658,8 @@ bool KICAD_API_SERVER::WaitForRequest( std::chrono::milliseconds aTimeout )
     return pending;
 }
 
+
+#ifndef KICAD_HEADLESS_API
 
 void KICAD_API_SERVER::handleApiEvent( wxCommandEvent& aEvent )
 {
@@ -628,6 +673,8 @@ void KICAD_API_SERVER::handleApiRequestString( std::string& aRequestString )
     // Note: at the point we call Reply(), we no longer own requestString.
     m_server->Reply( DispatchBytes( aRequestString ) );
 }
+
+#endif // KICAD_HEADLESS_API
 
 
 std::string KICAD_API_SERVER::DispatchBytes( const std::string& aRequestBytes )

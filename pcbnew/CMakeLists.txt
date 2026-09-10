@@ -587,6 +587,198 @@ set( PCBNEW_SRCS
 set( PCBNEW_COMMON_SRCS
     )
 
+#
+# Headless split.
+#
+# PCBNEW_GUI_SRCS names everything in PCBNEW_SRCS that needs a frame, a dialog, a
+# wxWidget, an interactive tool or OpenCascade.  What is left is the board model,
+# the pcb_io plugins, DRC, the zone filler, the plotters/exporters and the API
+# handlers.
+#
+set( PCBNEW_GUI_SRCS
+    ${PCBNEW_DIALOGS}
+    ${PCBNEW_MICROWAVE_SRCS}
+    ${ZONE_MANAGER_SRCS}
+
+    # OpenCascade
+    exporters/step/exporter_step.cpp
+    exporters/step/glb_utils.cpp
+    exporters/step/kicad3d_info.cpp
+    exporters/step/step_pcb_model.cpp
+    exporters/step/KI_XCAFDoc_AssemblyGraph.cxx
+    exporters/u3d/bit_stream_writer.cpp
+    exporters/u3d/constants.cpp
+    exporters/u3d/context_manager.cpp
+    exporters/u3d/data_block.cpp
+    exporters/u3d/writer.cpp
+
+    board_stackup_manager/panel_board_finish.cpp
+    board_stackup_manager/panel_board_finish_base.cpp
+    board_stackup_manager/panel_board_stackup.cpp
+    board_stackup_manager/panel_board_stackup_base.cpp
+    board_stackup_manager/dialog_dielectric_list_manager_base.cpp
+    board_stackup_manager/dialog_dielectric_list_manager.cpp
+
+    import_gfx/dialog_import_graphics.cpp
+    import_gfx/dialog_import_graphics_base.cpp
+
+    autorouter/spread_footprints.cpp
+    autorouter/autoplace_tool.cpp
+
+    board_statistics.cpp
+    cross-probing.cpp
+    edit_track_width.cpp
+    edit_zone_helpers.cpp
+    files.cpp
+    footprint_chooser_frame.cpp
+    footprint_edit_frame.cpp
+    footprint_editor_tab_context.cpp
+    footprint_editor_utils.cpp
+    footprint_fields_data_model.cpp
+    footprint_libraries_utils.cpp
+    footprint_preview_panel.cpp
+    footprint_tree_pane.cpp
+    footprint_viewer_frame.cpp
+    footprint_wizard.cpp
+    fp_tree_model_adapter.cpp
+    fp_tree_synchronizing_adapter.cpp
+    generate_footprint_info.cpp
+    grid_layer_box_helpers.cpp
+    grid_layer_box_helpers.h
+    initpcb.cpp
+    layer_pairs.cpp
+    load_select_footprint.cpp
+    menubar_footprint_editor.cpp
+    menubar_pcb_editor.cpp
+    pcb_base_edit_frame.cpp
+    pcb_edit_frame.cpp
+    pcb_fields_grid_table.cpp
+    pcb_layer_box_selector.cpp
+    pcbnew_config.cpp
+    pcbnew_printout.cpp
+    toolbars_footprint_editor.cpp
+    toolbars_footprint_viewer.cpp
+    toolbars_footprint_wizard.cpp
+    toolbars_pcb_editor.cpp
+    undo_redo.cpp
+
+    tools/align_distribute_tool.cpp
+    tools/array_tool.cpp
+    tools/board_editor_control.cpp
+    tools/board_inspection_tool.cpp
+    tools/board_reannotate_tool.cpp
+    tools/constraint_edit_tool.cpp
+    tools/constraint_overlay.cpp
+    tools/convert_tool.cpp
+    tools/creepage_overlay.cpp
+    tools/diff_phase_skew_tool.cpp
+    tools/drawing_tool.cpp
+    tools/drc_rule_editor_tool.cpp
+    tools/edit_tool.cpp
+    tools/edit_tool_move_fct.cpp
+    tools/footprint_chooser_selection_tool.cpp
+    tools/footprint_editor_control.cpp
+    tools/footprint_wizard_tools.cpp
+    tools/generator_tool.cpp
+    tools/generator_tool_pns_proxy.cpp
+    tools/graphic_edit.cpp
+    tools/graphic_edit_tool.cpp
+    tools/graphic_extend.cpp
+    tools/graphic_trim.cpp
+    tools/hover_picker.cpp
+    tools/match_properties_tool.cpp
+    tools/multichannel_tool.cpp
+    tools/pad_tool.cpp
+    tools/pcb_control.cpp
+    tools/pcb_design_block_control.cpp
+    tools/pcb_edit_table_tool.cpp
+    tools/pcb_group_tool.cpp
+    tools/pcb_picker_tool.cpp
+    tools/pcb_selection_tool.cpp
+    tools/position_relative_tool.cpp
+    tools/view_overlay_holder.cpp
+    tools/zone_create_helper.cpp
+
+    widgets/appearance_controls.cpp
+    widgets/appearance_controls_base.cpp
+    widgets/footprint_wizard_properties_panel.cpp
+    widgets/constraint_list_view.cpp
+    widgets/panel_constraints.cpp
+    widgets/panel_constraints_base.cpp
+    widgets/panel_footprint_chooser.cpp
+    widgets/panel_selection_filter.cpp
+    widgets/panel_selection_filter_base.cpp
+    widgets/pcb_design_block_pane.cpp
+    widgets/pcb_design_block_preview_widget.cpp
+    widgets/pcb_properties_panel.cpp
+    widgets/pcb_search_pane.cpp
+    widgets/search_handlers.cpp
+    widgets/net_inspector_panel.cpp
+    widgets/pcb_net_inspector_panel.cpp
+    widgets/vertex_editor_pane.cpp
+
+    diff_merge/pcb_diff_canvas_context.cpp
+
+    # The DRC rule editor: one dialog and ~30 wxPanels.  Only the .kicad_dru loader and
+    # saver and drc_rule_editor_utils.cpp are model code, and those stay in.
+    drc/rule_editor/drc_re_panel_matcher.cpp
+    drc/rule_editor/dialog_drc_rule_editor.cpp
+    drc/rule_editor/panel_drc_rule_editor_base.cpp
+    drc/rule_editor/panel_drc_rule_editor.cpp
+    drc/rule_editor/drc_re_bitmap_overlay_panel.cpp
+    drc/rule_editor/drc_re_object_selector_panel.cpp
+    drc/rule_editor/drc_re_overlay_field.cpp
+    drc/rule_editor/drc_re_routing_width_overlay_panel.cpp
+    drc/rule_editor/drc_re_rtg_diff_pair_overlay_panel.cpp
+    drc/rule_editor/drc_re_min_txt_ht_th_overlay_panel.cpp
+    drc/rule_editor/drc_re_abs_length_two_overlay_panel.cpp
+    drc/rule_editor/drc_re_matched_length_diff_pair_overlay_panel.cpp
+    drc/rule_editor/drc_re_via_style_overlay_panel.cpp
+    drc/rule_editor/drc_re_numeric_input_overlay_panel.cpp
+    drc/rule_editor/drc_re_bool_input_overlay_panel.cpp
+    drc/rule_editor/drc_re_vias_under_smd_overlay_panel.cpp
+    drc/rule_editor/drc_re_permitted_layers_overlay_panel.cpp
+    drc/rule_editor/drc_re_allowed_orientation_overlay_panel.cpp
+    drc/rule_editor/drc_re_condition_row_panel.cpp
+    drc/rule_editor/drc_re_condition_group_panel.cpp
+    drc/rule_editor/drc_re_custom_rule_panel.cpp
+    drc/rule_editor/panel_drc_group_header_base.cpp
+    drc/rule_editor/panel_drc_group_header.cpp
+    drc/rule_editor/drc_re_validator_checkbox_list.cpp
+    drc/rule_editor/drc_re_validator_combo_ctrl.cpp
+    drc/rule_editor/drc_re_validator_min_max_ctrl.cpp
+    drc/rule_editor/drc_re_validator_min_preferred_max_ctrl.cpp
+    drc/rule_editor/drc_re_validator_numeric_ctrl.cpp
+    )
+
+if( KICAD_HEADLESS_API )
+    foreach( _excluded ${PCBNEW_GUI_SRCS} )
+        list( FIND PCBNEW_SRCS ${_excluded} _found )
+
+        if( _found EQUAL -1 )
+            message( FATAL_ERROR
+                     "KICAD_HEADLESS_API: ${_excluded} is no longer in PCBNEW_SRCS" )
+        endif()
+    endforeach()
+
+    list( REMOVE_ITEM PCBNEW_SRCS ${PCBNEW_GUI_SRCS} )
+
+    # The 3-way merge driver is written against libgit2, which this build does not link.
+    list( REMOVE_ITEM PCBNEW_SRCS git/kigit_pcb_merge.cpp )
+
+    # Sources that sit in a GUI group but carry no GUI of their own and are reached from the
+    # API path, so they go back in.  Keep the reason with each one.
+    set( PCBNEW_HEADLESS_KEEP
+        # The board statistics job collects its drill table through this.
+        board_statistics.cpp
+
+        # NETLIST_UPDATER spreads newly added footprints; pure geometry over FOOTPRINT.
+        autorouter/spread_footprints.cpp
+        )
+
+    list( APPEND PCBNEW_SRCS ${PCBNEW_HEADLESS_KEEP} )
+endif()
+
 if( WIN32 )
     if( MINGW )
 #PCBNEW_RESOURCES variable is set by the macro.
@@ -705,6 +897,8 @@ add_subdirectory( pcb_io/autotrax )
 
 set( PCBNEW_IO_LIBRARIES pcad2kicadpcb allegro2pcbnew altium2pcbnew cadstar2pcbnew easyeda easyedapro fabmaster ipc2581 odbpp pads2pcbnew sprint_layout2pcbnew diptrace2pcbnew autotrax2pcbnew CACHE INTERNAL "")
 
+if( NOT KICAD_HEADLESS_API )
+
 #a very small program launcher for pcbnew_kiface
 add_executable( pcbnew WIN32 MACOSX_BUNDLE
     ${CMAKE_SOURCE_DIR}/common/single_top.cpp
@@ -723,6 +917,8 @@ target_link_libraries( pcbnew
 target_link_options( pcbnew PRIVATE
     $<$<BOOL:${KICAD_MAKE_LINK_MAPS}>:-Wl,--cref,-Map=pcbnew.map>
     )
+
+endif() # NOT KICAD_HEADLESS_API
 
 #the main pcbnew program, in DSO form.
 add_library( pcbnew_kiface_objects OBJECT

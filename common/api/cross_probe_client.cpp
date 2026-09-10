@@ -18,7 +18,9 @@
  */
 
 #include <api/cross_probe_client.h>
+#ifndef KICAD_HEADLESS_API
 #include <api/api_client.h>
+#endif
 #include <api/api_server.h>
 #include <api/api_utils.h>
 #include <api/common/envelope.pb.h>
@@ -32,6 +34,8 @@
 std::mutex CROSS_PROBE_CLIENT::s_mutex;
 std::map<FRAME_T, std::string> CROSS_PROBE_CLIENT::s_peers;
 
+
+#ifndef KICAD_HEADLESS_API
 
 static bool sendRequest( const std::string& aUrl, const google::protobuf::Message& aRequest )
 {
@@ -116,6 +120,27 @@ void CROSS_PROBE_CLIENT::AnnounceToPrimary( FRAME_T aFrameType )
                                                 wxString::FromUTF8( primaryUrl ) ) );
     }
 }
+
+
+#else // KICAD_HEADLESS_API
+
+// The headless API core has no client transport (nng is not in the wasm dependency set), so
+// there is nobody to cross-probe *to*.  RegisterPeer below still works, which is what the
+// CrossProbeAnnounce API command needs.
+
+bool CROSS_PROBE_CLIENT::SendToFrame( FRAME_T, const google::protobuf::Message& )
+{
+    wxLogTrace( traceApi, wxS( "crossprobe: no client transport in this build" ) );
+    return false;
+}
+
+
+void CROSS_PROBE_CLIENT::AnnounceToPrimary( FRAME_T )
+{
+    wxLogTrace( traceApi, wxS( "crossprobe: no client transport in this build" ) );
+}
+
+#endif // KICAD_HEADLESS_API
 
 
 void CROSS_PROBE_CLIENT::RegisterPeer( FRAME_T aFrameType, const std::string& aSocketPath )

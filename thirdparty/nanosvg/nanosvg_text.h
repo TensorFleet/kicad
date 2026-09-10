@@ -226,6 +226,13 @@ struct NSVGtextOutline
 
 static void nsvg__textContent( NSVGparser* p, const char* content, bool cdata )
 {
+#ifdef NANOSVG_NO_FONTCONFIG
+    // KiCad: no Fontconfig means no way to resolve a family name to a face, so an SVG's
+    // text simply does not draw.  Paths, shapes and images are unaffected.
+    (void) content;
+    (void) cdata;
+    return;
+#else
     if( !p->text || p->text->positions.empty() || p->text->ignoredDepth || p->defsFlag )
         return;
 
@@ -435,4 +442,5 @@ static void nsvg__textContent( NSVGparser* p, const char* content, bool cdata )
         position.index += codepoints.size();
 
     text.hasContent = true;
+#endif // NANOSVG_NO_FONTCONFIG
 }

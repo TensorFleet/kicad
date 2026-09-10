@@ -98,6 +98,25 @@ endif()
 ####################################
 # Feature flags
 ####################################
+
+# Build only the headless API core: the board/schematic model, file I/O, DRC/ERC,
+# the zone filler, the plotters and the API handlers, all as static libraries.
+# No GUI sources, no GAL renderers, no network stack, no dlopen.
+option( KICAD_HEADLESS_API
+    "Static headless API core: no GUI, no GAL renderers, no network, no dlopen"
+    OFF )
+
+if( KICAD_HEADLESS_API )
+    # Compiled into every translation unit so the sources can guard GUI-only code.
+    add_compile_definitions( KICAD_HEADLESS_API=1 )
+    # common/tool/*.cpp's COROUTINE is replaced by a run-to-completion stub, so
+    # libcontext (hand written assembly) is not needed.
+    add_compile_definitions( KICAD_SYNC_COROUTINE=1 )
+    set( KICAD_LIB_TYPE STATIC )
+else()
+    set( KICAD_LIB_TYPE SHARED )
+endif()
+
 option( KICAD_SPICE_QA
     "Build software Quality assurance unit tests for spice (default ON)"
     ON )
@@ -795,33 +814,63 @@ find_package(ZLIB REQUIRED)
 find_package(ZSTD REQUIRED)
 
 #
-# Find libcurl, required
+# Find libcurl, required (the headless core has no network stack)
 #
-find_package( CURL REQUIRED )
+if( NOT KICAD_HEADLESS_API )
+    find_package( CURL REQUIRED )
+endif()
 
-if( UNIX AND NOT APPLE )
+if( UNIX AND NOT APPLE AND NOT KICAD_HEADLESS_API )
     find_package( SPNAV REQUIRED )
     include_directories( SYSTEM ${SPNAV_INCLUDE_DIR} )
 endif()
 
 #
-# Find Cairo library, required
+# Find Cairo library, required.
 #
-find_package( Cairo 1.12 REQUIRED )
-include_directories( SYSTEM ${CAIRO_INCLUDE_DIR} )
+# The headless API core drops both the Cairo GAL renderer and PNG_PLOTTER (see
+# common/plotters/PNG_plotter_stub.cpp); PLOT_FORMAT::PNG reports that it is not
+# available in this build.  ${CAIRO_LIBRARIES}/${PIXMAN_LIBRARIES} expand to nothing.
+#
+if( NOT KICAD_HEADLESS_API )
+    find_package( Cairo 1.12 REQUIRED )
+    include_directories( SYSTEM ${CAIRO_INCLUDE_DIR} )
 
-find_package( Pixman 0.30 REQUIRED )
-include_directories( SYSTEM ${PIXMAN_INCLUDE_DIR} )
+    find_package( Pixman 0.30 REQUIRED )
+    include_directories( SYSTEM ${PIXMAN_INCLUDE_DIR} )
+else()
+    # These are cache entries once a non-headless build has configured in this tree, and a
+    # cache entry shows through a plain set() with no value, so clear the cache itself.
+    unset( CAIRO_LIBRARIES CACHE )
+    unset( CAIRO_INCLUDE_DIR CACHE )
+    unset( PIXMAN_LIBRARIES CACHE )
+    unset( PIXMAN_INCLUDE_DIR CACHE )
+endif()
 
-# Find libgit2, required
-find_package( libgit2 1.5 REQUIRED )
+# Find libgit2, required.
+#
+# The headless API core has no VCS at all: KICOMMON_VCS_SRCS, local_history.cpp,
+# history_lock.cpp and text_eval_vcs.cpp are dropped and common/headless/vcs_stub.cpp
+# stands in for what the API path calls (no repository, no local history; saving still
+# works).  ${LIBGIT2_LIBRARIES} expands to nothing.
+if( NOT KICAD_HEADLESS_API )
+    find_package( libgit2 1.5 REQUIRED )
 
-# Set include directories for libgit
-include_directories(${LIBGIT2_INCLUDE_DIRS})
+    # Set include directories for libgit
+    include_directories(${LIBGIT2_INCLUDE_DIRS})
+else()
+    unset( LIBGIT2_LIBRARIES CACHE )
+    unset( LIBGIT2_INCLUDE_DIRS CACHE )
+endif()
 
 #
 # Find Boost headers and libraries, required.
-set( BOOST_REQUESTED_COMPONENTS locale )    # locale is required by nanoodbc/database libraries
+# The locale component is only pulled in by nanodbc, which the headless core drops.
+if( KICAD_HEADLESS_API )
+    set( BOOST_REQUESTED_COMPONENTS )
+else()
+    set( BOOST_REQUESTED_COMPONENTS locale )    # locale is required by nanoodbc/database libraries
+endif()
 
 if( KICAD_BUILD_QA_TESTS )
     # required by the unit test framework
@@ -843,28 +892,39 @@ include_directories( SYSTEM ${FREETYPE_INCLUDE_DIRS} )
 find_package( HarfBuzz REQUIRED )
 include_directories( SYSTEM ${HarfBuzz_INCLUDE_DIRS} )
 
-find_package( Fontconfig REQUIRED )
+# KiCad's own wrapper is replaced by common/font/fontconfig_manifest.cpp under the headless
+# option (no FcInit, no font cache scan); nanosvg is compiled with NANOSVG_NO_FONTCONFIG
+# and emf2svg/libwmf are not built, so nothing is left that needs the library.
+if( NOT KICAD_HEADLESS_API )
+    find_package( Fontconfig REQUIRED )
+else()
+    unset( Fontconfig_LIBRARIES CACHE )
+    unset( Fontconfig_INCLUDE_DIRS CACHE )
+endif()
 
 # Include MinGW resource compiler.
 include( MinGWResourceCompiler )
 
-# Find ngspice library, required for integrated circuit simulator
-find_package( ngspice REQUIRED )
+# The simulator and the STEP/3D exporters are not part of the headless API core.
+if( NOT KICAD_HEADLESS_API )
+    # Find ngspice library, required for integrated circuit simulator
+    find_package( ngspice REQUIRED )
 
-# Find OpenCascade, required for STEP plugin and tools
-find_package(OCC)
-if( NOT OCC_FOUND )
-    MESSAGE( FATAL_ERROR "================================================================\n"
-                         " OpenCASCADE was not found!\n"
-                         "================================================================\n")
+    # Find OpenCascade, required for STEP plugin and tools
+    find_package(OCC)
+    if( NOT OCC_FOUND )
+        MESSAGE( FATAL_ERROR "================================================================\n"
+                             " OpenCASCADE was not found!\n"
+                             "================================================================\n")
+    endif()
+    if( OCC_VERSION_STRING VERSION_LESS 7.6.0 )
+        MESSAGE( FATAL_ERROR "================================================================\n"
+                             "OpenCASCADE version ${OCC_VERSION_STRING} was found.\n"
+                             "  KiCad requires a minimum version of 7.6.0\n"
+                             "================================================================\n")
+    endif()
+    include_directories( SYSTEM ${OCC_INCLUDE_DIR} )
 endif()
-if( OCC_VERSION_STRING VERSION_LESS 7.6.0 )
-    MESSAGE( FATAL_ERROR "================================================================\n"
-                         "OpenCASCADE version ${OCC_VERSION_STRING} was found.\n"
-                         "  KiCad requires a minimum version of 7.6.0\n"
-                         "================================================================\n")
-endif()
-include_directories( SYSTEM ${OCC_INCLUDE_DIR} )
 
 # Try to find Protobuf with modern approach first, fallback to legacy if needed
 set( _protobuf_found FALSE )
@@ -995,8 +1055,10 @@ message(STATUS "wxUSE_GLCANVAS_EGL=${wxWidgets_GLCANVAS_EGL}")
 message(STATUS "wxHAS_GLX=${wxWidgets_HAS_GLX}")
 message(STATUS "wxHAS_EGL=${wxWidgets_HAS_EGL}")
 
-# Find OpenGL with GLU
-find_package( OpenGL REQUIRED )
+# Find OpenGL with GLU (the headless core builds no GAL renderers)
+if( NOT KICAD_HEADLESS_API )
+    find_package( OpenGL REQUIRED )
+endif()
 
 if( KICAD_WAYLAND )
     message( STATUS "Configuring KiCad to support Wayland features" )
@@ -1042,7 +1104,14 @@ if( KICAD_USE_SENTRY )
     add_compile_definitions( KICAD_USE_SENTRY )
 endif()
 
-find_package( nng REQUIRED )
+# nng is the API server transport.
+#
+# The headless API core has no sockets: KICAD_API_SERVER::Start() is compiled out and a host
+# reaches Dispatch()/DispatchBytes() through StartInProcess.  See common/api/api_server.cpp
+# and common/api/cross_probe_client.cpp.
+if( NOT KICAD_HEADLESS_API )
+    find_package( nng REQUIRED )
+endif()
 
 #================================================
 # Add the doxygen target
@@ -1093,6 +1162,16 @@ if( UNIX AND NOT APPLE )
 endif()
 
 # Binaries ( CMake targets )
+if( KICAD_HEADLESS_API )
+    # Only the pieces the headless API core needs.  The executable that links them
+    # together lives outside this list (see host/).
+    add_subdirectory( api )
+    add_subdirectory( thirdparty )
+    add_subdirectory( libs )
+    add_subdirectory( common )
+    add_subdirectory( eeschema )
+    add_subdirectory( pcbnew )
+else()
 add_subdirectory( api )
 add_subdirectory( resources )
 add_subdirectory( thirdparty )
@@ -1110,6 +1189,7 @@ add_subdirectory( cvpcb )               # must be after pcbnew
 add_subdirectory( kicad )               # should follow pcbnew, eeschema, api
 add_subdirectory( tools )
 add_subdirectory( utils )
+endif()
 
 if( KICAD_BUILD_QA_TESTS )
     add_subdirectory( qa )

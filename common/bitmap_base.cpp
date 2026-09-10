@@ -71,7 +71,9 @@ BITMAP_BASE::BITMAP_BASE( const BITMAP_BASE& aSchBitmap )
     if( aSchBitmap.m_image )
     {
         m_image   = new wxImage( *aSchBitmap.m_image );
+#ifndef KICAD_HEADLESS_API
         m_bitmap  = new wxBitmap( *m_image );
+#endif
         m_originalImage = new wxImage( *aSchBitmap.m_originalImage );
         m_imageType = aSchBitmap.m_imageType;
         m_imageData = aSchBitmap.m_imageData;
@@ -85,7 +87,10 @@ void BITMAP_BASE::rebuildBitmap( bool aResetID )
     if( m_bitmap )
         delete m_bitmap;
 
-    m_bitmap  = new wxBitmap( *m_image );
+#ifndef KICAD_HEADLESS_API
+    // wxBitmap is the device-side copy, and only DrawBitmap() -- a wxDC path -- reads it.
+    m_bitmap = new wxBitmap( *m_image );
+#endif
     m_bitmapDirty = false;
 
     if( aResetID )
@@ -101,7 +106,9 @@ void BITMAP_BASE::ensureBitmapUpToDate() const
         if( m_bitmap )
             delete m_bitmap;
 
+#ifndef KICAD_HEADLESS_API
         m_bitmap = new wxBitmap( *m_image );
+#endif
         m_bitmapDirty = false;
     }
 }
@@ -281,7 +288,9 @@ bool BITMAP_BASE::LoadLegacyData( LINE_READER& aLine, wxString& aErrorMsg )
             m_image = new wxImage();
             wxMemoryInputStream istream( stream );
             m_image->LoadFile( istream, wxBITMAP_TYPE_ANY );
+#ifndef KICAD_HEADLESS_API
             m_bitmap = new wxBitmap( *m_image );
+#endif
             m_originalImage = new wxImage( *m_image );
             updateImageDataBuffer();
             break;
@@ -321,6 +330,12 @@ const BOX2I BITMAP_BASE::GetBoundingBox() const
 void BITMAP_BASE::DrawBitmap( wxDC* aDC, const VECTOR2I& aPos,
                               const KIGFX::COLOR4D& aBackgroundColor ) const
 {
+#ifdef KICAD_HEADLESS_API
+    // There is no wxDC in this build, and m_bitmap is never built; nothing draws.
+    (void) aDC;
+    (void) aPos;
+    (void) aBackgroundColor;
+#else
     ensureBitmapUpToDate();
 
     if( m_bitmap == nullptr )
@@ -435,6 +450,7 @@ void BITMAP_BASE::DrawBitmap( wxDC* aDC, const VECTOR2I& aPos,
 #ifdef USE_CLIP_AREA
     aDC->DestroyClippingRegion();
 #endif
+#endif // KICAD_HEADLESS_API
 }
 
 

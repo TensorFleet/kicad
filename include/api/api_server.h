@@ -41,8 +41,10 @@
 class API_HANDLER;
 class API_HANDLER_FALLBACK;
 class API_HANDLER_SERVER;
+#ifndef KICAD_HEADLESS_API
 class KINNG_PUBLISHER;
 class KINNG_REQUEST_SERVER;
+#endif
 class wxEvtHandler;
 
 
@@ -228,10 +230,12 @@ private:
 
     void log( const std::string& aOutput );
 
+#ifndef KICAD_HEADLESS_API
     std::unique_ptr<KINNG_REQUEST_SERVER> m_server;
 
     /// Pushes kiapi.common.events.Event messages to subscribers; see Publish
     std::unique_ptr<KINNG_PUBLISHER> m_publisher;
+#endif
 
     /// Set by StartInProcess: no sockets, and Publish hands events to m_eventSink
     bool m_inProcess = false;

@@ -339,12 +339,17 @@ HANDLER_RESULT<google::protobuf::Empty> API_HANDLER_FOOTPRINT_LIBRARY::handleDel
 HANDLER_RESULT<ListWizardsResponse> API_HANDLER_FOOTPRINT_LIBRARY::handleListWizards(
         const HANDLER_CONTEXT<ListWizards>& aCtx )
 {
+    ListWizardsResponse response;
+
+#ifdef KICAD_HEADLESS_API
+    // Wizards are out-of-process API plugins, and this build has no plugin manager to find
+    // them with; the honest answer is that none are installed.
+    return response;
+#else
     if( !m_wizards )
         m_wizards = std::make_unique<FOOTPRINT_WIZARD_MANAGER>();
 
     m_wizards->ReloadWizards();
-
-    ListWizardsResponse response;
 
     for( FOOTPRINT_WIZARD* wizard : m_wizards->Wizards() )
     {
@@ -362,6 +367,7 @@ HANDLER_RESULT<ListWizardsResponse> API_HANDLER_FOOTPRINT_LIBRARY::handleListWiz
     }
 
     return response;
+#endif
 }
 
 
@@ -370,6 +376,10 @@ HANDLER_RESULT<kiapi::common::types::WizardGeneratedContent> API_HANDLER_FOOTPRI
 {
     using namespace kiapi::common::types;
 
+#ifdef KICAD_HEADLESS_API
+    return tl::unexpected( badRequest( fmt::format( "no wizard '{}'; see ListWizards",
+                                                    aCtx.Request.identifier() ) ) );
+#else
     if( !m_wizards )
     {
         m_wizards = std::make_unique<FOOTPRINT_WIZARD_MANAGER>();
@@ -423,4 +433,5 @@ HANDLER_RESULT<kiapi::common::types::WizardGeneratedContent> API_HANDLER_FOOTPRI
     response.set_status( WGS_OK );
     response.mutable_content()->PackFrom( packed );
     return response;
+#endif
 }

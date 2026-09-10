@@ -54,14 +54,28 @@ add_subdirectory( fmt )
 add_subdirectory( glad )
 add_subdirectory( gzip-hpp )
 add_subdirectory( lemon )
-add_subdirectory( libcontext )
-add_subdirectory( libemf2svg )
+# libcontext is the coroutine stack switcher (hand-written assembly).  The headless
+# build uses the run-to-completion COROUTINE stand-in instead; see coroutine_sync.h.
+if( NOT KICAD_HEADLESS_API )
+    add_subdirectory( libcontext )
+endif()
+# libemf2svg links Fontconfig and libwmf is only reached from eeschema's OLE image
+# helpers; both are dropped under the headless option along with sch_io/ole_*.cpp.
+if( NOT KICAD_HEADLESS_API )
+    add_subdirectory( libemf2svg )
+endif()
 add_subdirectory( libpopcnt )
-add_subdirectory( libwmf )
+if( NOT KICAD_HEADLESS_API )
+    add_subdirectory( libwmf )
+endif()
 add_subdirectory( magic_enum )
 add_subdirectory( markdown2html )
 add_subdirectory( nanoflann )
-add_subdirectory( nanodbc )
+# nanodbc is only reached from common/database/database_connection.cpp, which the
+# headless build drops.
+if( NOT KICAD_HEADLESS_API )
+    add_subdirectory( nanodbc )
+endif()
 add_subdirectory( nanosvg )
 add_subdirectory( rectpack2d )
 add_subdirectory( rtree )

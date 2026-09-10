@@ -21,7 +21,14 @@
 #ifndef KICAD_FONTCONFIG_H
 #define KICAD_FONTCONFIG_H
 
+#ifndef KICAD_HEADLESS_API
 #include <fontconfig/fontconfig.h>
+#else
+// The headless build links common/font/fontconfig_stub.cpp and never calls into
+// libfontconfig; Emscripten has no fontconfig headers at all.  Nothing declared below
+// names an Fc type -- FONTCONFIG_PAT is an opaque forward declaration -- so the real
+// header is only needed by common/font/fontconfig.cpp, which is not built here.
+#endif
 
 #include <kicommon.h>
 #include <wx/string.h>

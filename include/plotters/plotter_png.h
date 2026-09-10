@@ -22,7 +22,15 @@
 
 #include "plotter.h"
 
+#ifdef KICAD_HEADLESS_API
+// The headless API core does not link Cairo.  common/plotters/PNG_plotter_stub.cpp stands
+// in for the rasterizer and reports that PNG output is not available in this build; the
+// two pointers below only ever hold nullptr, so a forward declaration is enough.
+typedef struct _cairo cairo_t;
+typedef struct _cairo_surface cairo_surface_t;
+#else
 #include <cairo.h>
+#endif
 
 
 constexpr int DEFAULT_PNG_DPI = 300;

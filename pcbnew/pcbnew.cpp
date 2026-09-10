@@ -36,7 +36,10 @@
 #include <kiface_base.h>
 #include <kiface_ids.h>
 #include <kiway_holder.h>
+#include <kiway_player.h>      // KICTL_* control flags; pcb_edit_frame.h pulls this in
+#ifndef KICAD_HEADLESS_API
 #include <pcb_edit_frame.h>
+#endif
 #include <macros.h>
 #include <gestfich.h>
 #include <paths.h>
@@ -46,17 +49,20 @@
 #include <settings/settings_manager.h>
 #include <settings/cvpcb_settings.h>
 #include <footprint_library_adapter.h>
+#ifndef KICAD_HEADLESS_API
 #include <footprint_edit_frame.h>
 #include <footprint_viewer_frame.h>
 #include <footprint_chooser_frame.h>
 #include <footprint_wizard_frame.h>
 #include <footprint_preview_panel.h>
+#endif
 #include <footprint_info_impl.h>
 #include <footprint.h>
 #include <board.h>
 #include <board_loader.h>
 #include <lib_id.h>
 #include <nlohmann/json.hpp>
+#ifndef KICAD_HEADLESS_API
 #include <dialogs/dialog_configure_paths.h>
 #include <dialogs/panel_grid_settings.h>
 #include <panel_display_options.h>
@@ -72,27 +78,36 @@
 #include <panel_3D_display_options.h>
 #include <panel_3D_opengl_options.h>
 #include <panel_3D_raytracing_options.h>
+#endif
 #include <project_pcb.h>
 #include <string_utils.h>
 #include <thread_pool.h>
 #include <trace_helpers.h>
+#ifndef KICAD_HEADLESS_API
 #include <widgets/kistatusbar.h>
+#endif
 
 #include <wx/tokenzr.h>
 
+#ifndef KICAD_HEADLESS_API
 #include "invoke_pcb_dialog.h"
+#endif
 #include <wildcards_and_files_ext.h>
 #include "pcbnew_jobs_handler.h"
 #include <diff_merge/diff_doc_kind.h>
 #include <reporter.h>
+#ifndef KICAD_HEADLESS_API
 #include "git/kigit_pcb_merge.h"
 #include "git/kigit_fp_merge.h"
 #include <git/kigit_driver_registry.h>
+#endif
 
+#ifndef KICAD_HEADLESS_API
 #include <dialogs/panel_toolbar_customization.h>
 #include <3d_viewer/toolbars_3d.h>
 #include <toolbars_footprint_editor.h>
 #include <toolbars_pcb_editor.h>
+#endif
 
 #include <wx/crt.h>
 
@@ -242,9 +257,11 @@ namespace PCB {
 static int pcbnewMergeExport( int aKind, const wxString& aAncestor, const wxString& aOurs,
                               const wxString& aTheirs, const wxString& aOutput, bool aInteractive,
                               bool aSingleFile, REPORTER* aReporter );
+#ifndef KICAD_HEADLESS_API
 static int pcbnewOpenDiffDialogExport( int aKind, const wxString& aFileA, const wxString& aFileB,
                                        const wxString& aLabelA, const wxString& aLabelB,
                                        wxWindow* aParent, REPORTER* aReporter );
+#endif
 
 
 static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
@@ -264,6 +281,10 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
 
     wxWindow* CreateKiWindow( wxWindow* aParent, int aClassId, KIWAY* aKiway, int aCtlBits = 0 ) override
     {
+#ifdef KICAD_HEADLESS_API
+        // No frames, no dialogs, no preference panels in the headless core.
+        return nullptr;
+#else
         switch( aClassId )
         {
         case FRAME_PCB_EDITOR:
@@ -521,6 +542,7 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
         default:
             return nullptr;
         }
+#endif
     }
 
     /**
@@ -543,6 +565,7 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
             // without directly linking to pcbnew or pcbcommon, going through PROJECT::FootprintLibAdapter
             PROJECT* project = nullptr;
 
+#ifndef KICAD_HEADLESS_API
             if( wxTheApp )
             {
                 wxWindow* focus = wxWindow::FindFocus();
@@ -554,6 +577,7 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
                         project = &holder->Prj();
                 }
             }
+#endif
 
             if( !project )
                 project = &Pgm().GetSettingsManager().Prj();
@@ -571,8 +595,10 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
         case KIFACE_MERGE_DOCUMENT:
             return reinterpret_cast<void*>( &pcbnewMergeExport );
 
+#ifndef KICAD_HEADLESS_API
         case KIFACE_OPEN_DIFF_DIALOG:
             return reinterpret_cast<void*>( &pcbnewOpenDiffDialogExport );
+#endif
 
         default:
             return nullptr;
@@ -648,6 +674,7 @@ int pcbnewMergeExport( int aKind, const wxString& aAncestor, const wxString& aOu
 }
 
 
+#ifndef KICAD_HEADLESS_API
 int pcbnewOpenDiffDialogExport( int aKind, const wxString& aFileA, const wxString& aFileB,
                                 const wxString& aLabelA, const wxString& aLabelB,
                                 wxWindow* aParent, REPORTER* aReporter )
@@ -655,6 +682,7 @@ int pcbnewOpenDiffDialogExport( int aKind, const wxString& aFileA, const wxStrin
     return kiface.JobHandler()->OpenDiffDialog( static_cast<KICAD_DIFF::DOC_KIND>( aKind ), aFileA,
                                                 aFileB, aLabelA, aLabelB, aParent, aReporter );
 }
+#endif
 
 } // namespace
 
@@ -682,7 +710,10 @@ bool IFACE::OnKifaceStart( PGM_BASE* aProgram, int aCtlBits, KIWAY* aKiway )
     SETTINGS_MANAGER& mgr = aProgram->GetSettingsManager();
 
     mgr.RegisterSettings( new FOOTPRINT_EDITOR_SETTINGS );
+#ifndef KICAD_HEADLESS_API
+    // The 3D viewer is not built headless, and nothing on the API path reads its settings.
     mgr.RegisterSettings( new EDA_3D_VIEWER_SETTINGS );
+#endif
 
     // We intentionally register KifaceSettings after FOOTPRINT_EDITOR_SETTINGS and EDA_3D_VIEWER_SETTINGS
     // In legacy configs, many settings were in a single editor config and the migration routine
@@ -711,8 +742,10 @@ bool IFACE::OnKifaceStart( PGM_BASE* aProgram, int aCtlBits, KIWAY* aKiway )
     // through our 3-way merge pipeline. git_merge_driver_register is not
     // thread-safe; this runs once at kiface init before any background work
     // spawns. The registry is idempotent so re-loads of the kiface are safe.
+#ifndef KICAD_HEADLESS_API
     KIGIT::RegisterMergeDriver( "kicad-pcb", &KIGIT_PCB_MERGE::Apply );
     KIGIT::RegisterMergeDriver( "kicad-fp",  &KIGIT_FP_MERGE::Apply );
+#endif
 
     return true;
 }

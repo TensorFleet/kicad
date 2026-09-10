@@ -33,8 +33,10 @@
 #include <libraries/library_table.h>
 #include <lockfile.h>
 #include <macros.h>
+#ifndef KICAD_HEADLESS_API
 #include <git/project_git_utils.h>
 #include <git2.h>
+#endif
 #include <project.h>
 
 #include <footprint_library_adapter.h>
@@ -103,14 +105,15 @@ bool PROJECT::TextVarResolver( wxString* aToken ) const
         *aToken = TITLE_BLOCK::GetCurrentTimeLocale();
         return true;
     }
-    else if( aToken->IsSameAs( wxT( "VCSHASH" ) ) )
+    else if( aToken->IsSameAs( wxT( "VCSHASH" ) ) || aToken->IsSameAs( wxT( "VCSSHORTHASH" ) ) )
     {
-        *aToken = KIGIT::PROJECT_GIT_UTILS::GetCurrentHash( GetProjectFullName(), false );
-        return true;
-    }
-    else if( aToken->IsSameAs( wxT( "VCSSHORTHASH" ) ) )
-    {
-        *aToken = KIGIT::PROJECT_GIT_UTILS::GetCurrentHash( GetProjectFullName(), true );
+#ifdef KICAD_HEADLESS_API
+        // No version control in this build; the same answer a project outside a repository gets.
+        *aToken = wxS( "no hash" );
+#else
+        *aToken = KIGIT::PROJECT_GIT_UTILS::GetCurrentHash( GetProjectFullName(),
+                                                            aToken->IsSameAs( wxT( "VCSSHORTHASH" ) ) );
+#endif
         return true;
     }
     else if( GetTextVars().count( *aToken ) > 0 )

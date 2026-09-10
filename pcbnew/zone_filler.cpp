@@ -1590,6 +1590,7 @@ bool ZONE_FILLER::Fill( const std::vector<ZONE*>& aZones, bool aCheck, wxWindow*
                                                 "Consider simplifying your zones." ),
                                              maxIterations );
 
+#ifndef KICAD_HEADLESS_API
             if( aParent )
             {
                 KIDIALOG dlg( aParent, msg, _( "Warning" ), wxOK | wxICON_WARNING );
@@ -1597,6 +1598,7 @@ bool ZONE_FILLER::Fill( const std::vector<ZONE*>& aZones, bool aCheck, wxWindow*
                 dlg.ShowModal();
             }
             else
+#endif
             {
                 wxLogWarning( msg );
             }
@@ -1859,6 +1861,11 @@ bool ZONE_FILLER::Fill( const std::vector<ZONE*>& aZones, bool aCheck, wxWindow*
         if( ( m_board->GetProject()
               && m_board->GetProject()->GetLocalSettings().m_PrototypeZoneFill ) )
         {
+#ifdef KICAD_HEADLESS_API
+            // Nobody to ask: take what the dialog's default button does, which is to turn the
+            // prototype setting off and let the refill below proceed.
+            m_board->GetProject()->GetLocalSettings().m_PrototypeZoneFill = false;
+#else
             KIDIALOG dlg( aParent, _( "Prototype zone fill enabled. Disable setting and refill?" ), _( "Confirmation" ),
                           wxOK | wxCANCEL | wxICON_WARNING );
             dlg.SetOKCancelLabels( _( "Disable and refill" ), _( "Continue without Refill" ) );
@@ -1872,10 +1879,14 @@ bool ZONE_FILLER::Fill( const std::vector<ZONE*>& aZones, bool aCheck, wxWindow*
             {
                 return false;
             }
+#endif
         }
 
         if( outOfDate )
         {
+            // Headless: nobody to ask, and the dialog's default button is Refill, so just
+            // fall through and refill.
+#ifndef KICAD_HEADLESS_API
             KIDIALOG dlg( aParent, _( "Zone fills are out-of-date. Refill?" ), _( "Confirmation" ),
                           wxOK | wxCANCEL | wxICON_WARNING );
             dlg.SetOKCancelLabels( _( "Refill" ), _( "Continue without Refill" ) );
@@ -1883,6 +1894,7 @@ bool ZONE_FILLER::Fill( const std::vector<ZONE*>& aZones, bool aCheck, wxWindow*
 
             if( dlg.ShowModal() == wxID_CANCEL )
                 return false;
+#endif
         }
         else
         {

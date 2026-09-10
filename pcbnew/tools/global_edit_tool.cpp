@@ -35,7 +35,11 @@
 #include <graphics_cleaner.h>
 #include <tracks_cleaner.h>
 #include <dialogs/dialog_cleanup_graphics.h>
+// This dialog pulls in the 3D viewer's board adapter (and through it OpenGL), which
+// the headless build does not compile.
+#ifndef KICAD_HEADLESS_API
 #include <dialogs/dialog_migrate_3d_models.h>
+#endif
 #include <board_design_settings.h>
 #include <pcb_edit_frame.h>
 
@@ -362,6 +366,7 @@ int GLOBAL_EDIT_TOOL::ZonesManager( const TOOL_EVENT& aEvent )
 
 int GLOBAL_EDIT_TOOL::Migrate3DModels( const TOOL_EVENT& /* aEvent */ )
 {
+#ifndef KICAD_HEADLESS_API
     PCB_EDIT_FRAME* editFrame = getEditFrame<PCB_EDIT_FRAME>();
 
     if( !editFrame )
@@ -369,6 +374,7 @@ int GLOBAL_EDIT_TOOL::Migrate3DModels( const TOOL_EVENT& /* aEvent */ )
 
     DIALOG_MIGRATE_3D_MODELS dlg( editFrame );
     dlg.ShowModal();
+#endif
     return 0;
 }
 
