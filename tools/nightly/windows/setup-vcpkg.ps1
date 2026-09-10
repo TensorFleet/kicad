@@ -30,7 +30,7 @@ $exports = @{
     VCPKG_ROOT                 = $vcpkgRoot
     VCPKG_DEFAULT_BINARY_CACHE = $cache
     VCPKG_BINARY_SOURCES       = "clear;files,$cache,readwrite"
-    NIGHTLY_TRIPLETS           = (Join-Path $root "tools\nightly\windows\triplets")
+    NIGHTLY_TRIPLETS           = (Join-Path $PSScriptRoot "triplets")
 }
 foreach ($kv in $exports.GetEnumerator()) {
     Write-Host "$($kv.Key)=$($kv.Value)"

@@ -3,10 +3,11 @@
 # The flags are those of fab_pcb/packages/kicad-patches/build-macos.sh (each one was a
 # configure failure on a stock Homebrew setup); see fab_pcb/docs/m0-runbook.md.
 #
-# Env: BUILD_DIR (default build/nightly), BUILD_TYPE (Release), JOBS (hw.ncpu)
+# Env: KICAD_SRC (default: the tree this script lives in), BUILD_DIR (default build/nightly),
+#      BUILD_TYPE (Release), JOBS (hw.ncpu)
 set -euo pipefail
 
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+SRC="${KICAD_SRC:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 BUILD_DIR="${BUILD_DIR:-$SRC/build/nightly}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 JOBS="${JOBS:-$(sysctl -n hw.ncpu)}"

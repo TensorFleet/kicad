@@ -6,17 +6,19 @@
 #   2. the rolling prerelease `nightly`: the same archives under stable names
 #      (kicad-cli-<platform>.<ext>), a merged manifest.json that keeps the previous asset of
 #      any platform that did not build tonight, and the `nightly` tag moved to the commit
-#   3. prune dated nightlies beyond $KEEP_NIGHTLIES
+#   3. prune dated nightlies published more than $KEEP_DAYS days ago (default 90).  This is
+#      the retention guarantee consumers pin against (tools/nightly/README.md): retention is
+#      by age, never by count, so it does not depend on how often the branch changes.
 #
 # Usage: release.sh <dir with kicad-cli-<tag>-<platform>.* archives>
 # Env:   GH_TOKEN GH_REPO NIGHTLY_TAG NIGHTLY_SHA NIGHTLY_VERSION NIGHTLY_DATE
-#        NIGHTLY_PLATFORMS (requested, space separated) NIGHTLY_RUN_URL KEEP_NIGHTLIES
+#        NIGHTLY_PLATFORMS (requested, space separated) NIGHTLY_RUN_URL KEEP_DAYS
 set -euo pipefail
 
 mkdir -p "$1"   # download-artifact creates nothing when every build failed
 ASSETS="$(cd "$1" && pwd)"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KEEP="${KEEP_NIGHTLIES:-14}"
+KEEP_DAYS="${KEEP_DAYS:-90}"
 SHORT="${NIGHTLY_SHA:0:10}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -91,12 +93,13 @@ else
 fi
 echo "updated rolling release nightly -> $NIGHTLY_SHA"
 
-# ------------------------------------------------------------------ 3. prune
-gh release list --limit 200 --json tagName,createdAt \
-  --jq '[.[] | select(.tagName | startswith("nightly-"))] | sort_by(.createdAt) | reverse | .[]?.tagName' \
-  | tail -n +"$((KEEP + 1))" | while read -r old; do
+# ------------------------------------------------------------------ 3. prune (by age only)
+cutoff="$(date -u -d "-${KEEP_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)"
+gh release list --limit 500 --json tagName,createdAt \
+  --jq --arg cutoff "$cutoff" '.[] | select(.tagName | startswith("nightly-")) | select(.createdAt < $cutoff) | .tagName' \
+  | while read -r old; do
       [ -n "$old" ] || continue
-      echo "pruning $old"
+      echo "pruning $old (older than $KEEP_DAYS days)"
       gh release delete "$old" --cleanup-tag --yes
     done
 
