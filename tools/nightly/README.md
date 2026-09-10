@@ -10,9 +10,11 @@ them as GitHub Releases of this repository:
 | `nightly-<YYYYMMDD>-<sha10>` | one prerelease per build; pin to it. The oldest are pruned (`KEEP_NIGHTLIES`, 14) |
 | `nightly` | rolling prerelease: the latest build of every platform under stable asset names |
 
-A build is skipped when the rolling release already carries the branch head for every
-platform, so an idle branch costs one short job a night. `workflow_dispatch` takes a `ref`,
-a `force` flag and a `platforms` subset.
+The schedule fires from the default branch (`master`) and builds `web-api`, the branch
+fab_pcb pins; the workflow file therefore has to be on `master`, the scripts on the branch
+being built. A build is skipped when the rolling release already carries that branch's head
+for every platform, so an idle branch costs one short job a night. `workflow_dispatch` takes
+a `ref`, a `force` flag and a `platforms` subset.
 
 ## Assets
 
@@ -58,11 +60,16 @@ build, `nightly` keeps that platform's previous archive rather than dropping it,
 top-level `commit` is the newest build. The dated releases only ever contain the platforms
 that built that night.
 
-The repository is private, so downloads need a token with `contents:read`
-(`Authorization: Bearer …`) and, for the archive bytes, the asset's API URL with
-`Accept: application/octet-stream` — `browser_download_url` does not work for private
-repositories. fab_pcb's `tooling/kicad-cli/fetch.ts` is a dependency-free reference
-downloader (manifest → platform → sha256 check → unpack → print the entrypoint).
+The repository is public, so the `url` fields download without authentication:
+
+```bash
+curl -fsSL https://github.com/TensorFleet/kicad/releases/download/nightly/manifest.json
+curl -fsSL https://github.com/TensorFleet/kicad/releases/download/nightly/kicad-cli-linux-x86_64.tar.gz | tar xz
+```
+
+A token only matters for the API rate limit when polling the manifest often. fab_pcb's
+`tooling/kicad-cli/fetch.ts` is a dependency-free reference downloader (manifest →
+platform → sha256 check → unpack → print the entrypoint).
 
 ## Archive layout
 
@@ -133,6 +140,6 @@ rolling release simply has no Windows asset yet. After that, cached ports restor
 minutes and a Windows build is about an hour.
 
 Linux builds in roughly an hour, macOS in one to two (the Apple-silicon runners have three
-cores); `ccache` is kept on the Actions cache for both. On a private repository macOS
-minutes are billed at a multiple of Linux ones, so drop `macos-x86_64` from `matrix.sh`
-if Intel Macs are not a target.
+cores); `ccache` is kept on the Actions cache for both. The repository is public, so the
+standard runners are free; a `linux-arm64` row on `ubuntu-24.04-arm` would work as is if
+ARM Linux hosts become a target.

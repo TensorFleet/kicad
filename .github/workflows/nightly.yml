@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Git ref to build (default: the branch this workflow runs from)"
+        description: "Git ref to build (default: web-api, the branch fab_pcb pins)"
         type: string
         default: ""
       force:
@@ -40,6 +40,11 @@ concurrency:
   group: nightly-release
   cancel-in-progress: false
 
+env:
+  # The schedule fires from the default branch (master, an upstream mirror kept level with
+  # web-api), but what fab_pcb and fabdesk pin is the API branch, so that is what gets built.
+  NIGHTLY_REF: web-api
+
 jobs:
   # ------------------------------------------------------------------ what to build
   prepare:
@@ -58,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || env.NIGHTLY_REF }}
           # `git describe --match "[0-9]*"` (cmake/CreateGitVersionHeader.cmake) needs the
           # commit graph and the tags but no historic trees: a treeless clone is a fraction
           # of the full one.
