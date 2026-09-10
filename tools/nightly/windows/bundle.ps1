@@ -4,7 +4,8 @@
 #   kicad-cli\
 #     bin\kicad-cli.exe
 #     bin\_pcbnew.dll  bin\_eeschema.dll      kifaces (KIFACE_SUFFIX is .dll on Windows);
-#                                            KIWAY loads them from the executable's directory
+#     bin\_cvpcb.dll                          KIWAY loads them from the executable's directory;
+#                                            eeschema's ERC loads _cvpcb too
 #     bin\kicommon.dll kigal.dll kiapi.dll    KiCad's own shared libraries
 #     bin\*.dll                               every vcpkg runtime DLL + the MSVC runtime
 #     share\kicad\schemas  share\kicad\template   GetStockDataPath() = <exe dir>\..\share\kicad
@@ -35,7 +36,7 @@ function Find-One([string]$name) {
     return $hits[0].FullName
 }
 
-foreach ($name in "kicad-cli.exe", "_pcbnew.dll", "_eeschema.dll", "kicommon.dll", "kigal.dll", "kiapi.dll") {
+foreach ($name in "kicad-cli.exe", "_pcbnew.dll", "_eeschema.dll", "_cvpcb.dll", "kicommon.dll", "kigal.dll", "kiapi.dll") {
     Copy-Item (Find-One $name) $bin
 }
 

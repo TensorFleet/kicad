@@ -31,5 +31,6 @@ cmake -S $root -B $buildDir -G Ninja `
     -DKICAD_USE_PCH=ON
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
-cmake --build $buildDir --target kicad-cli pcbnew_kiface eeschema_kiface
+# cvpcb: eeschema's ERC (and footprint assignment) loads the cvpcb kiface at run time.
+cmake --build $buildDir --target kicad-cli pcbnew_kiface eeschema_kiface cvpcb_kiface
 exit $LASTEXITCODE

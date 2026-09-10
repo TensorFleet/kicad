@@ -5,7 +5,8 @@
       kicad-cli              launcher: sets KICAD_STOCK_DATA_HOME, execs bin/kicad-cli
       bin/kicad-cli          the executable (RUNPATH $ORIGIN/../lib)
       bin/_pcbnew.kiface     kifaces; KIWAY loads them from the executable's directory
-      bin/_eeschema.kiface
+      bin/_eeschema.kiface   (eeschema's ERC loads _cvpcb too)
+      bin/_cvpcb.kiface
       lib/*.so*              libkicommon/libkigal/libkiapi and every non-system dependency
       share/kicad/schemas    api/schemas from the source tree
       share/kicad/template   resources/project_template
@@ -100,7 +101,7 @@ def main():
 
     # ---- our own binaries
     roots = []
-    for name in ("kicad-cli", "_pcbnew.kiface", "_eeschema.kiface"):
+    for name in ("kicad-cli", "_pcbnew.kiface", "_eeschema.kiface", "_cvpcb.kiface"):
         dst = os.path.join(bin_dir, name)
         shutil.copy2(find_one(build, name), dst)
         roots.append(dst)

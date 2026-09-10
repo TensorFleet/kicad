@@ -20,7 +20,7 @@ docker run --rm \
     apt-get update -qq
     apt-get install -y -qq --no-install-recommends $PKGS > /dev/null
     echo '== unresolved libraries (must be none)'
-    LD_LIBRARY_PATH= ldd /kicad-cli/bin/kicad-cli /kicad-cli/bin/_pcbnew.kiface /kicad-cli/bin/_eeschema.kiface /kicad-cli/lib/*.so* \
+    LD_LIBRARY_PATH= ldd /kicad-cli/bin/kicad-cli /kicad-cli/bin/*.kiface /kicad-cli/lib/*.so* \
       | grep 'not found' && exit 1 || true
     bash /smoke.sh /kicad-cli/kicad-cli /
   "

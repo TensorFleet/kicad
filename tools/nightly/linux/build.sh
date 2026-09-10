@@ -30,6 +30,7 @@ cmake -S "$SRC" -B "$BUILD_DIR" -G Ninja \
   -DKICAD_INSTALL_DEMOS=OFF \
   -DKICAD_USE_PCH=ON
 
-ninja -C "$BUILD_DIR" -j"$JOBS" kicad-cli pcbnew_kiface eeschema_kiface
+# cvpcb: eeschema's ERC (and footprint assignment) loads the cvpcb kiface at run time.
+ninja -C "$BUILD_DIR" -j"$JOBS" kicad-cli pcbnew_kiface eeschema_kiface cvpcb_kiface
 
 command -v ccache >/dev/null && ccache --show-stats || true
