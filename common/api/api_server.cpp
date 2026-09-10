@@ -369,12 +369,56 @@ void KICAD_API_SERVER::Start()
 }
 
 
+void KICAD_API_SERVER::StartInProcess( EVENT_SINK aSink, const std::string& aRequestUrl,
+                                       const std::string& aEventsUrl )
+{
+    if( Running() )
+        return;
+
+    m_inProcess = true;
+    m_eventSink = m_publishEvents ? std::move( aSink ) : nullptr;
+    m_inProcessRequestUrl = aRequestUrl;
+    m_inProcessEventsUrl = m_eventSink ? aEventsUrl : std::string();
+
+    m_logFilePath.AssignDir( PATHS::GetLogsPath() );
+    m_logFilePath.SetName( s_logFileName );
+
+    if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
+    {
+        PATHS::EnsurePathExists( PATHS::GetLogsPath() );
+        log( fmt::format( "--- KiCad API server started at {} ---\n", SocketPath() ) );
+    }
+
+    wxLogTrace( traceApi, wxString::Format( "Server: serving in process at %s", SocketPath() ) );
+}
+
+
 void KICAD_API_SERVER::Stop()
 {
     if( !Running() )
         return;
 
     wxLogTrace( traceApi, "Stopping server" );
+
+    if( m_inProcess )
+    {
+        if( m_eventSink )
+        {
+            kiapi::common::events::Event shutdown;
+            shutdown.mutable_server_shutdown();
+            Publish( std::move( shutdown ) );
+        }
+
+        m_inProcess = false;
+        m_eventSink = nullptr;
+        m_inProcessRequestUrl.clear();
+        m_inProcessEventsUrl.clear();
+
+        // Release anyone blocked in WaitForRequest
+        m_wakeCondition.notify_all();
+        return;
+    }
+
     Unbind( API_REQUEST_EVENT, &KICAD_API_SERVER::handleApiEvent, this );
 
     if( m_publisher )
@@ -397,7 +441,7 @@ void KICAD_API_SERVER::Stop()
 
 bool KICAD_API_SERVER::Running() const
 {
-    return m_server && m_server->Running();
+    return m_inProcess || ( m_server && m_server->Running() );
 }
 
 
@@ -456,13 +500,20 @@ GetServerInfoResponse KICAD_API_SERVER::ServerInfo() const
 
 bool KICAD_API_SERVER::Publish( kiapi::common::events::Event aEvent )
 {
-    if( !m_publisher )
+    if( !m_publisher && !m_eventSink )
         return false;
 
     aEvent.set_sequence( m_eventSequence.fetch_add( 1, std::memory_order_acq_rel ) + 1 );
 
     if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
         log( "Event: " + aEvent.ShortDebugString() + "\n" );
+
+    // An in-process host has no publisher; it takes the same bytes a subscriber would receive
+    if( m_eventSink )
+    {
+        m_eventSink( aEvent.SerializeAsString() );
+        return true;
+    }
 
     return m_publisher->Publish( aEvent.SerializeAsString() );
 }
@@ -508,12 +559,18 @@ GetSupportedCommandsResponse KICAD_API_SERVER::SupportedCommands() const
 
 std::string KICAD_API_SERVER::SocketPath() const
 {
+    if( m_inProcess )
+        return m_inProcessRequestUrl;
+
     return m_server ? m_server->SocketPath() : "";
 }
 
 
 std::string KICAD_API_SERVER::EventsSocketPath() const
 {
+    if( m_inProcess )
+        return m_inProcessEventsUrl;
+
     return m_publisher ? m_publisher->SocketPath() : "";
 }
 
@@ -568,20 +625,37 @@ void KICAD_API_SERVER::handleApiEvent( wxCommandEvent& aEvent )
 
 void KICAD_API_SERVER::handleApiRequestString( std::string& aRequestString )
 {
+    // Note: at the point we call Reply(), we no longer own requestString.
+    m_server->Reply( DispatchBytes( aRequestString ) );
+}
+
+
+std::string KICAD_API_SERVER::DispatchBytes( const std::string& aRequestBytes )
+{
+    // The socket path checks this on the server thread (see onApiRequest) so that a client is
+    // answered without waiting for the host to pump events; an in-process host relies on this.
+    if( !m_readyToReply.load( std::memory_order_acquire ) )
+    {
+        ApiResponse notHandled;
+        notHandled.mutable_status()->set_status( ApiStatusCode::AS_NOT_READY );
+        notHandled.mutable_status()->set_error_message( "KiCad is not ready to reply" );
+        log( "Got incoming request but was not yet ready to reply." );
+        return notHandled.SerializeAsString();
+    }
+
     ApiRequest request;
 
-    if( !request.ParseFromString( aRequestString ) )
+    if( !request.ParseFromString( aRequestBytes ) )
     {
         ApiResponse error;
         error.mutable_header()->set_kicad_token( m_token );
         error.mutable_status()->set_status( ApiStatusCode::AS_BAD_REQUEST );
         error.mutable_status()->set_error_message( "request could not be parsed" );
-        m_server->Reply( error.SerializeAsString() );
 
         if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
             log( "Response (ERROR): " + error.Utf8DebugString() );
 
-        return;
+        return error.SerializeAsString();
     }
 
     if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
@@ -595,45 +669,41 @@ void KICAD_API_SERVER::handleApiRequestString( std::string& aRequestString )
         error.mutable_status()->set_status( ApiStatusCode::AS_TOKEN_MISMATCH );
         error.mutable_status()->set_error_message(
                 "the provided kicad_token did not match this KiCad instance's token" );
-        m_server->Reply( error.SerializeAsString() );
 
         if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
             log( "Response (ERROR): " + error.Utf8DebugString() );
 
-        return;
+        return error.SerializeAsString();
     }
 
     API_RESULT result = Dispatch( request );
 
-    // Note: at the point we call Reply(), we no longer own requestString.
-
     if( result.has_value() )
     {
         result->mutable_header()->set_kicad_token( m_token );
-        m_server->Reply( result->SerializeAsString() );
 
         if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
             log( "Response: " + result->Utf8DebugString() );
+
+        return result->SerializeAsString();
     }
-    else
+
+    ApiResponse error;
+    error.mutable_status()->CopyFrom( result.error() );
+    error.mutable_header()->set_kicad_token( m_token );
+
+    if( result.error().status() == ApiStatusCode::AS_UNHANDLED )
     {
-        ApiResponse error;
-        error.mutable_status()->CopyFrom( result.error() );
-        error.mutable_header()->set_kicad_token( m_token );
-
-        if( result.error().status() == ApiStatusCode::AS_UNHANDLED )
-        {
-            std::string type = "<unparseable Any>";
-            google::protobuf::Any::ParseAnyTypeUrl( request.message().type_url(), &type );
-            std::string msg = fmt::format( "no handler available for request of type {}", type );
-            error.mutable_status()->set_error_message( msg );
-        }
-
-        m_server->Reply( error.SerializeAsString() );
-
-        if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
-            log( "Response (ERROR): " + error.Utf8DebugString() );
+        std::string type = "<unparseable Any>";
+        google::protobuf::Any::ParseAnyTypeUrl( request.message().type_url(), &type );
+        std::string msg = fmt::format( "no handler available for request of type {}", type );
+        error.mutable_status()->set_error_message( msg );
     }
+
+    if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
+        log( "Response (ERROR): " + error.Utf8DebugString() );
+
+    return error.SerializeAsString();
 }
 
 

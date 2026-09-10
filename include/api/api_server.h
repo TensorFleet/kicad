@@ -24,6 +24,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -51,11 +52,39 @@ wxDECLARE_EVENT( API_REQUEST_EVENT, wxCommandEvent );
 class KICOMMON_API KICAD_API_SERVER : public wxEvtHandler
 {
 public:
+    /// Receives the serialized bytes of each published event; see StartInProcess.  Since 11.0
+    using EVENT_SINK = std::function<void( const std::string& )>;
+
     KICAD_API_SERVER( bool aAutoStart = true );
 
     ~KICAD_API_SERVER();
 
     void Start();
+
+    /**
+     * Run without a socket: no KINNG listener, no publisher, and no wx event queueing.  The host
+     * feeds requests in by hand with DispatchBytes() and receives published events through
+     * aSink, which is called synchronously on the publishing thread.
+     *
+     * The URLs are not connected to anything; they are what GetServerInfo reports, so that a
+     * client sees the same shape of answer as it would over a socket.
+     *
+     * @param aSink receives every published event (ignored if SetPublishEvents( false ) was called)
+     * @param aRequestUrl is reported as the request socket URL
+     * @param aEventsUrl is reported as the events socket URL
+     */
+    void StartInProcess( EVENT_SINK aSink, const std::string& aRequestUrl = "inproc://kicad",
+                         const std::string& aEventsUrl = "inproc://kicad-events" );
+
+    /**
+     * The whole of request handling minus the transport: the ready-flag guard, parsing, the
+     * token check, Dispatch(), and serialization.  This is what the socket path replies with,
+     * so an in-process host answers requests identically.  Never throws.
+     *
+     * @param aRequestBytes is a serialized kiapi.common.ApiRequest
+     * @return the serialized kiapi.common.ApiResponse to hand back to the client
+     */
+    std::string DispatchBytes( const std::string& aRequestBytes );
 
     void Stop();
 
@@ -203,6 +232,17 @@ private:
 
     /// Pushes kiapi.common.events.Event messages to subscribers; see Publish
     std::unique_ptr<KINNG_PUBLISHER> m_publisher;
+
+    /// Set by StartInProcess: no sockets, and Publish hands events to m_eventSink
+    bool m_inProcess = false;
+
+    /// Where Publish sends events when running in process; see StartInProcess
+    EVENT_SINK m_eventSink;
+
+    /// What SocketPath() and EventsSocketPath() report when running in process
+    std::string m_inProcessRequestUrl;
+
+    std::string m_inProcessEventsUrl;
 
     std::atomic<uint64_t> m_eventSequence;
 
