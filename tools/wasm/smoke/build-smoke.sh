@@ -85,7 +85,10 @@ else
 fi
 
 echo "== smoke: running under bun =="
-if bun "$OUT/run.mjs"; then
+if ! command -v bun >/dev/null 2>&1; then
+    # CI runners have node but not bun; the module is the same, so node's verdict stands.
+    echo "smoke: bun not installed, skipped"
+elif bun "$OUT/run.mjs"; then
     echo "smoke: bun PASS"
 else
     echo "smoke: bun FAIL"
