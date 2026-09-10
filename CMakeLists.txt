@@ -74,8 +74,11 @@ if( APPLE )
     add_compile_definitions( GL_SILENCE_DEPRECATION=1 )
 endif()
 
-# Create a flag to identify the non-Apple unix systems
-if( UNIX AND NOT APPLE )
+# Create a flag to identify the non-Apple unix systems.
+# Emscripten sets UNIX, but it is not a Linux/BSD desktop: no Wayland, no X11, no
+# libspnav, no flatpak, no link maps.  Everything guarded by UNIX_NOT_APPLE is a
+# desktop-Linux feature, so it must be off there.
+if( UNIX AND NOT APPLE AND NOT EMSCRIPTEN )
     set( UNIX_NOT_APPLE ON )
 else()
     set( UNIX_NOT_APPLE OFF )
@@ -105,6 +108,20 @@ endif()
 option( KICAD_HEADLESS_API
     "Static headless API core: no GUI, no GAL renderers, no network, no dlopen"
     OFF )
+
+# Emscripten can only ever produce the headless core, and a number of the normal
+# host-build features are either unavailable or meaningless there.
+if( EMSCRIPTEN )
+    set( KICAD_HEADLESS_API ON  CACHE BOOL "" FORCE )
+    set( KICAD_USE_PCH      OFF CACHE BOOL "" FORCE )
+    set( KICAD_BUILD_I18N   OFF CACHE BOOL "" FORCE )
+    set( KICAD_USE_SENTRY   OFF CACHE BOOL "" FORCE )
+    set( KICAD_BUILD_QA_TESTS OFF CACHE BOOL "" FORCE )
+    set( KICAD_UPDATE_CHECK OFF CACHE BOOL "" FORCE )
+    set( KICAD_INSTALL_DEMOS OFF CACHE BOOL "" FORCE )
+    # There is no wxWidgets port under Emscripten; the caller supplies the shim.
+    set( KICAD_WX_PORT "none" CACHE STRING "" FORCE )
+endif()
 
 if( KICAD_HEADLESS_API )
     # Compiled into every translation unit so the sources can guard GUI-only code.
@@ -1011,6 +1028,21 @@ set( wxWidgets_REQ_VERSION 3.2.0 )
 # See line 49 of cmake/FindwxWidgets.cmake
 set( wxWidgets_CONFIG_OPTIONS ${wxWidgets_CONFIG_OPTIONS} --static=no )
 
+if( EMSCRIPTEN )
+    # There is no wxWidgets build for Emscripten; the caller passes in a shim by
+    # setting wxWidgets_LIBRARIES / wxWidgets_INCLUDE_DIRS / wxWidgets_DEFINITIONS
+    # on the command line.  Honour them verbatim and skip the port detection.
+    if( NOT DEFINED wxWidgets_INCLUDE_DIRS )
+        message( FATAL_ERROR
+                 "Emscripten builds must supply -DwxWidgets_INCLUDE_DIRS=<path to the wx shim>" )
+    endif()
+    include_directories( SYSTEM ${wxWidgets_INCLUDE_DIRS} )
+    if( wxWidgets_DEFINITIONS )
+        add_compile_definitions( ${wxWidgets_DEFINITIONS} )
+    endif()
+    set( wxWidgets_VERSION_STRING "3.2.0" )
+else()
+
 find_package( wxWidgets ${wxWidgets_REQ_VERSION} COMPONENTS gl aui adv html core net base propgrid xml stc richtext webview REQUIRED )
 
 # Include wxWidgets macros.
@@ -1054,6 +1086,8 @@ endif()
 message(STATUS "wxUSE_GLCANVAS_EGL=${wxWidgets_GLCANVAS_EGL}")
 message(STATUS "wxHAS_GLX=${wxWidgets_HAS_GLX}")
 message(STATUS "wxHAS_EGL=${wxWidgets_HAS_EGL}")
+
+endif() # EMSCRIPTEN wx shim
 
 # The headless API core is meant to link against wxBase alone, because that is all an
 # Emscripten build has.  Narrowing the native link line here means the native gate discovers

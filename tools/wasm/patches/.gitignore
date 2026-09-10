@@ -1,0 +1,2 @@
+# tools/wasm patches are source, not build output: undo the top-level "*.patch" ignore
+!*.patch
