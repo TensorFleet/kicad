@@ -1,9 +1,10 @@
 # Nightly `kicad-cli` releases
 
 `.github/workflows/nightly.yml` builds the headless server of this fork — `kicad-cli` plus
-the `_pcbnew` and `_eeschema` kifaces, the three targets fab_pcb's
-`packages/kicad-patches` builds — for Linux, macOS and Windows every night and publishes
-them as GitHub Releases of this repository:
+the `_pcbnew`, `_eeschema` and `_cvpcb` kifaces (the targets fab_pcb's
+`packages/kicad-patches` builds, plus cvpcb, which eeschema's ERC loads at run time) — for
+Linux, macOS and Windows every night and publishes them as GitHub Releases of this
+repository:
 
 | Release | What it is |
 |---|---|
@@ -80,9 +81,9 @@ kicad-cli/kicad-cli                  Linux, macOS: launcher; run this
 kicad-cli/bin/kicad-cli.exe          Windows: run this
 kicad-cli/KICAD_COMMIT  VERSION      provenance
 
-Linux    bin/{kicad-cli,_pcbnew.kiface,_eeschema.kiface}  lib/*.so*  share/kicad/{schemas,template}
+Linux    bin/{kicad-cli,_pcbnew.kiface,_eeschema.kiface,_cvpcb.kiface}  lib/*.so*  share/kicad/{schemas,template}
 macOS    KiCad.app/Contents/{MacOS/kicad-cli, PlugIns/*.kiface, Frameworks/*.dylib, SharedSupport/}
-Windows  bin/{kicad-cli.exe,_pcbnew.dll,_eeschema.dll,ki*.dll,<vcpkg + MSVC runtime>.dll}  share/kicad/
+Windows  bin/{kicad-cli.exe,_pcbnew.dll,_eeschema.dll,_cvpcb.dll,ki*.dll,<vcpkg + MSVC runtime>.dll}  share/kicad/
 ```
 
 ```

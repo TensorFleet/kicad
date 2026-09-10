@@ -33,7 +33,8 @@ SUPPORT="$APP/Contents/SharedSupport"
 mkdir -p "$MACOS" "$PLUGINS" "$FW" "$SUPPORT"
 
 cp "$APP_SRC/Contents/MacOS/kicad-cli" "$MACOS/"
-cp "$APP_SRC/Contents/PlugIns/_pcbnew.kiface" "$APP_SRC/Contents/PlugIns/_eeschema.kiface" "$PLUGINS/"
+cp "$APP_SRC/Contents/PlugIns/_pcbnew.kiface" "$APP_SRC/Contents/PlugIns/_eeschema.kiface" \
+   "$APP_SRC/Contents/PlugIns/_cvpcb.kiface" "$PLUGINS/"
 cp "$APP_SRC"/Contents/Frameworks/libki*.dylib "$FW/"
 [ -f "$APP_SRC/Contents/Info.plist" ] && cp "$APP_SRC/Contents/Info.plist" "$APP/Contents/"
 cp -R "$SRC/api/schemas" "$SUPPORT/schemas"
