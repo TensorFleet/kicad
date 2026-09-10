@@ -777,6 +777,12 @@ if( KICAD_HEADLESS_API )
         )
 
     list( APPEND PCBNEW_SRCS ${PCBNEW_HEADLESS_KEEP} )
+
+    # The KIFACE itself.  In the dynamic build pcbnew.cpp is compiled separately into
+    # the .kiface module; here it joins the object set, with its GUI half compiled out
+    # by the KICAD_HEADLESS_API guards inside it.  The Kiface/KIFACE_GETTER renaming
+    # below is what lets it coexist with eeschema's copy in one image.
+    list( APPEND PCBNEW_SRCS pcbnew.cpp )
 endif()
 
 if( WIN32 )
@@ -964,6 +970,20 @@ target_link_libraries( pcbnew_kiface_objects
         ${OCC_LIBRARIES}
     )
 
+if( KICAD_HEADLESS_API )
+    # Rename the single-kiface-per-module entry points so that the pcbnew and
+    # eeschema object sets can be linked into one image.  See common/kiway.cpp.
+    # pcbcommon gets the same treatment because it compiles pcbnew sources.
+    target_compile_definitions( pcbnew_kiface_objects PRIVATE
+        Kiface=KifacePcb
+        KIFACE_GETTER=KifaceGetterPcb )
+    target_compile_definitions( pcbcommon PRIVATE
+        Kiface=KifacePcb
+        KIFACE_GETTER=KifaceGetterPcb )
+endif()
+
+if( NOT KICAD_HEADLESS_API )
+
 add_library( pcbnew_kiface MODULE
     pcbnew.cpp
     )
@@ -1096,3 +1116,5 @@ if( KICAD_WIN32_INSTALL_PDBS )
     install(FILES $<TARGET_PDB_FILE:pcbnew> DESTINATION ${KICAD_BIN})
     install(FILES $<TARGET_PDB_FILE:pcbnew_kiface> DESTINATION ${KICAD_KIFACE})
 endif()
+
+endif() # NOT KICAD_HEADLESS_API

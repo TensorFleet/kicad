@@ -715,6 +715,12 @@ if( KICAD_HEADLESS_API )
     # EESCHEMA_PRINTING is passed to the object library separately, and is entirely
     # the print dialog and the wxPrintout implementation.
     set( EESCHEMA_PRINTING )
+
+    # The KIFACE itself.  In the dynamic build eeschema.cpp is compiled separately into
+    # the .kiface module; here it joins the object set, with its GUI half compiled out
+    # by the KICAD_HEADLESS_API guards inside it.  The Kiface/KIFACE_GETTER renaming
+    # below is what lets it coexist with pcbnew's copy in one image.
+    list( APPEND EESCHEMA_SRCS eeschema.cpp )
 endif()
 
 if( WIN32 )
@@ -875,6 +881,16 @@ if( NOT KICAD_HEADLESS_API )
     add_dependencies( eeschema_kiface_objects eeschema_navlib )
 endif()
 
+if( KICAD_HEADLESS_API )
+    # Rename the single-kiface-per-module entry points so that the pcbnew and
+    # eeschema object sets can be linked into one image.  See common/kiway.cpp.
+    target_compile_definitions( eeschema_kiface_objects PRIVATE
+        Kiface=KifaceSch
+        KIFACE_GETTER=KifaceGetterSch )
+endif()
+
+if( NOT KICAD_HEADLESS_API )
+
 add_library( eeschema_kiface MODULE
     eeschema.cpp
     )
@@ -1003,6 +1019,9 @@ if( KICAD_WIN32_INSTALL_PDBS )
     install(FILES $<TARGET_PDB_FILE:eeschema_kiface> DESTINATION ${KICAD_KIFACE})
 endif()
 
+endif() # NOT KICAD_HEADLESS_API
+
+# The lexers feed eeschema_kiface_objects, so they are needed in both builds.
 make_lexer(
     eeschema_kiface_objects
     dialogs/dialog_bom_cfg.keywords
