@@ -42,7 +42,6 @@ set( KICAD_SRCS
     local_history_pane.cpp
     menubar.cpp
     mergetool_frame.cpp
-    project_template.cpp
     project_tree_pane.cpp
     project_tree.cpp
     project_tree_item.cpp
@@ -54,7 +53,6 @@ set( KICAD_SRCS
     )
 
 set( KICAD_CLI_SRCS
-    project_template.cpp
     cli/command.cpp
     cli/command_api_server.cpp
     cli/command_export_bom.cpp

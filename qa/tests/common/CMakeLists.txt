@@ -170,9 +170,8 @@ set( QA_COMMON_SRCS
     test_graphics_importer_buffer.cpp
     test_svg_import.cpp
 
-    # Project template tests (source included directly since it's from kicad executable)
+    # Project template tests (PROJECT_TEMPLATE itself lives in the common library)
     test_project_template.cpp
-    ${CMAKE_SOURCE_DIR}/kicad/project_template.cpp
 
     # Project file tests
     test_project_file.cpp

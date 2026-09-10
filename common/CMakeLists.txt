@@ -941,6 +941,8 @@ list( APPEND COMMON_SRCS
     api/api_undo_stack.cpp
     api/api_handler_library.cpp
     api/api_jobs.cpp
+    api/api_server_host.cpp
+    project_template.cpp
 )
 
 add_library( common STATIC
