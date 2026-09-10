@@ -40,7 +40,10 @@ class PROJECT;
  *
  * Since 11.0
  */
-class KICOMMON_API API_HANDLER_LIBRARY : public API_HANDLER
+// Built into the static `common` library (like API_HANDLER_COMMON and API_HANDLER_EDITOR),
+// not the kicommon DLL, so it must not carry KICOMMON_API: on MSVC that would make every
+// user expect a DLL import that nothing exports (LNK2019 in _pcbnew.dll / _eeschema.dll).
+class API_HANDLER_LIBRARY : public API_HANDLER
 {
 public:
     /**
