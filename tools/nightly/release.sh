@@ -13,6 +13,7 @@
 #        NIGHTLY_PLATFORMS (requested, space separated) NIGHTLY_RUN_URL KEEP_NIGHTLIES
 set -euo pipefail
 
+mkdir -p "$1"   # download-artifact creates nothing when every build failed
 ASSETS="$(cd "$1" && pwd)"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KEEP="${KEEP_NIGHTLIES:-14}"

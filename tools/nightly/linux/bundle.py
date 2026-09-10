@@ -40,8 +40,10 @@ EXCLUDE = (
     "libGL.so", "libGLX", "libGLdispatch", "libEGL", "libOpenGL", "libGLESv", "libgbm", "libdrm",
     "libX11", "libXext", "libXrender", "libXi.so", "libXrandr", "libXcursor", "libXfixes", "libXinerama",
     "libXcomposite", "libXdamage", "libXxf86vm", "libXau", "libXdmcp", "libxcb", "libxkbcommon",
-    "libwayland", "libdbus-1", "libsecret-1", "libudev", "libsystemd", "libselinux", "libpcre2",
+    "libwayland", "libdbus-1", "libsecret-1", "libudev", "libsystemd", "libselinux",
     "libffi", "libmount", "libblkid",
+    # not libpcre2: wxWidgets links libpcre2-32 itself (wxRegEx), and libpcre2-32-0 is not
+    # part of a stock desktop the way GLib's libpcre2-8 is
 )
 
 
