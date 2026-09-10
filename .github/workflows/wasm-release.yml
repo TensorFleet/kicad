@@ -168,8 +168,13 @@ jobs:
           {
             echo "LEMON_EXE=$GITHUB_WORKSPACE/build/host-tools/bin/lemon"
             echo "Protobuf_PROTOC_EXECUTABLE=$GITHUB_WORKSPACE/build/host-tools/bin/protoc"
-            # configure.sh's default is `brew --prefix glm`; on Linux the headers are in /usr.
-            echo "GLM_PREFIX=/usr"
+            # configure.sh's default is `brew --prefix glm`.  On Linux the headers live in
+            # /usr/include, but that prefix must NOT reach the emscripten compile: an
+            # -I/usr/include puts glibc's stdint.h ahead of the wasm sysroot's.  Stage the
+            # header-only library on its own so the include path holds glm and nothing else.
+            mkdir -p "$GITHUB_WORKSPACE/build/glm-stage/include"
+            ln -sfn /usr/include/glm "$GITHUB_WORKSPACE/build/glm-stage/include/glm"
+            echo "GLM_PREFIX=$GITHUB_WORKSPACE/build/glm-stage"
           } >> "$GITHUB_ENV"
 
       # ------------------------------------------------------------------ wasm dependencies
