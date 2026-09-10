@@ -657,6 +657,10 @@ if( KICAD_HEADLESS_API )
         # serves it; the class is plain JSON parameters.
         symbol_editor/symbol_editor_settings.cpp
 
+        # EESCHEMA_JOBS_HANDLER::JobExportBom builds a SYMBOL_FIELDS_EDITOR_GRID_DATA_MODEL
+        # and exports it; the grid half of the model is compiled out under the option.
+        symbol_fields_data_model.cpp
+
         # The SIM_MODEL half of eeschema/sim: SCHEMATIC_SETTINGS embeds NGSPICE_SETTINGS,
         # SCH_SYMBOL migrates simulation fields, and the spice netlist exporter is built on
         # SIM_LIB_MGR and the model serializer.  None of it needs the simulator frame or

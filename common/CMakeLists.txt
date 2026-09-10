@@ -1209,6 +1209,18 @@ if( KICAD_HEADLESS_API )
 
     list( REMOVE_ITEM COMMON_SRCS ${COMMON_GUI_SRCS} )
 
+    # Sources that belong to a GUI group as a whole but carry no GUI of their own and are
+    # reached from the API path, so they go back in.  Keep the reason with each one.
+    set( COMMON_HEADLESS_KEEP
+        # The fields tables' shared data model.  It is the BOM's data source as much as it is
+        # a grid table -- both eeschema's and pcbnew's `bom` jobs build one and call Export()
+        # on it -- and under KICAD_HEADLESS_API it sits on HEADLESS_GRID_TABLE_BASE instead of
+        # wxGridTableBase, with the cell attribute/renderer half compiled out.
+        dialogs/fields_table_data_model.cpp
+        )
+
+    list( APPEND COMMON_SRCS ${COMMON_HEADLESS_KEEP} )
+
     # PNG_PLOTTER rasterizes through Cairo, which is not in the wasm dependency set.  The
     # stub keeps the class (PLOT_FORMAT::PNG is an enumerator the plot paths construct a
     # plotter for) but reports that PNG output is not available and fails cleanly.

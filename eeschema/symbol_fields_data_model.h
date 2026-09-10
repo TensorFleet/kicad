@@ -58,7 +58,9 @@ public:
         m_symbolsList.SplitReferences();
     }
 
+#ifndef KICAD_HEADLESS_API
     wxGridCellAttr* GetAttr( int aRow, int aCol, wxGridCellAttr::wxAttrKind aKind ) override;
+#endif
 
     void SetValue( int aRow, int aCol, const wxString& aValue ) override;
     void ClearCell( int aRow, int aCol ) override;

@@ -28,6 +28,10 @@
 #include <widgets/wx_grid.h>
 #include <widgets/ui_common.h>
 
+#ifdef KICAD_HEADLESS_API
+#include <widgets/headless_grid_table.h>
+#endif
+
 #include <common.h>
 #include <eda_pattern_match.h>
 #include <kiid.h>
@@ -115,10 +119,24 @@ struct DATA_MODEL_ROW
 
 
 /**
+ * The grid table the fields data models sit on.
+ *
+ * In the GUI build that is KiCad's wxGridTableBase subclass.  Under KICAD_HEADLESS_API wxGrid
+ * is not in the link, so the models sit on a plain abstract base declaring the same virtuals
+ * (see widgets/headless_grid_table.h); the BOM exporter never needs a view.
+ */
+#ifdef KICAD_HEADLESS_API
+using FIELDS_TABLE_GRID_BASE = HEADLESS_GRID_TABLE_BASE;
+#else
+using FIELDS_TABLE_GRID_BASE = WX_GRID_TABLE_BASE;
+#endif
+
+
+/**
  * Contains everything completly generic to fields tables data models,
  * as well as column functionality that doesn't touch the internal fields data store.
  */
-class FIELDS_TABLE_DATA_MODEL_BASE : public WX_GRID_TABLE_BASE
+class FIELDS_TABLE_DATA_MODEL_BASE : public FIELDS_TABLE_GRID_BASE
 {
 public:
     FIELDS_TABLE_DATA_MODEL_BASE();
@@ -268,6 +286,7 @@ protected:
     // Helper function to translate named attribute values like ${DNP}.
     virtual wxString getAttributeResolvedValue( const wxString& aFieldName, bool aValue ) const;
 
+#ifndef KICAD_HEADLESS_API
     bool cellUsesResolvedTextRenderer( int aRow, int aCol );
     void applyResolvedTextRenderer( wxGridCellAttr* aAttr, bool aApplyTint );
 
@@ -276,13 +295,16 @@ protected:
 
     wxGridCellAttr* applyCellDecorations( wxGridCellAttr* aAttr, int aRow, int aCol );
     wxGridCellAttr* applyFieldPresenceRenderer( wxGridCellAttr* aAttr, int aRow, int aCol );
+#endif
 
     // Column mutations invalidate the position-based coordinates held by an open wxGrid editor.
     void            commitPendingGridChanges();
 
 protected:
+#ifndef KICAD_HEADLESS_API
     wxGridCellRenderer* m_stripedRenderer;
     wxGridCellRenderer* m_resolvedTextRenderer;
+#endif
 
     bool             m_edited;
     int              m_sortColumn;
@@ -329,6 +351,7 @@ protected:
 };
 
 
+#ifndef KICAD_HEADLESS_API
 /**
  * Cell renderer that shows the expanded result of text variables (e.g. "${VALUE}" is
  * displayed as "10K").  The actual cell still stores the raw variable so it can be
@@ -346,6 +369,7 @@ public:
 
     wxGridCellRenderer* Clone() const override;
 };
+#endif
 
 
 /**
@@ -374,11 +398,13 @@ public:
         if( aAddedByUser )
             m_edited = true;
 
+#ifndef KICAD_HEADLESS_API
         if( wxGrid* grid = GetView() )
         {
             wxGridTableMessage msg( this, wxGRIDTABLE_NOTIFY_COLS_APPENDED, 1 );
             grid->ProcessTableMessage( msg );
         }
+#endif
     }
 
 
@@ -535,8 +561,10 @@ public:
         m_rows[aRow].m_state = ROW_STATE::EXPANDED_PARENT;
         m_rows.insert( m_rows.begin() + aRow + 1, children.begin(), children.end() );
 
+#ifndef KICAD_HEADLESS_API
         wxGridTableMessage msg( this, wxGRIDTABLE_NOTIFY_ROWS_INSERTED, aRow + 1, children.size() );
         GetView()->ProcessTableMessage( msg );
+#endif
     }
 
 
@@ -555,8 +583,10 @@ public:
         m_rows[aRow].m_state = ROW_STATE::COLLAPSED;
         m_rows.erase( firstChild, afterLastChild );
 
+#ifndef KICAD_HEADLESS_API
         wxGridTableMessage msg( this, wxGRIDTABLE_NOTIFY_ROWS_DELETED, aRow + 1, deleted );
         GetView()->ProcessTableMessage( msg );
+#endif
     }
 
 

@@ -774,6 +774,10 @@ if( KICAD_HEADLESS_API )
 
         # NETLIST_UPDATER spreads newly added footprints; pure geometry over FOOTPRINT.
         autorouter/spread_footprints.cpp
+
+        # PCBNEW_JOBS_HANDLER::JobExportBom builds a FOOTPRINT_FIELDS_EDITOR_GRID_DATA_MODEL
+        # and exports it; the grid half of the model is compiled out under the option.
+        footprint_fields_data_model.cpp
         )
 
     list( APPEND PCBNEW_SRCS ${PCBNEW_HEADLESS_KEEP} )
