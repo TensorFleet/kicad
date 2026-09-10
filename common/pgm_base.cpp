@@ -920,6 +920,11 @@ void PGM_BASE::WritePdfBrowserInfos()
 
 void PGM_BASE::PreloadDesignBlockLibraries( KIWAY* aKiway )
 {
+#ifdef KICAD_HEADLESS_API
+    // The preload only exists to warm the GUI's library trees, and it reports progress through
+    // the background job monitor, which this build does not have.  The adapters load on demand.
+    (void) aKiway;
+#else
     // TODO(JE) much of this code can be shared across the 3 preloads
     constexpr static int interval = 150;
     constexpr static int timeLimit = 120000;
@@ -996,6 +1001,7 @@ void PGM_BASE::PreloadDesignBlockLibraries( KIWAY* aKiway )
     thread_pool& tp = GetKiCadThreadPool();
     m_libraryPreloadInProgress.store( true );
     m_libraryPreloadReturn = tp.submit_task( preload );
+#endif
 }
 
 

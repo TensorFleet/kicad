@@ -314,7 +314,9 @@ bool PCB_PLOTTER::Plot( const wxString& aOutputPath, const LSEQ& aLayersToPlot,
 
         pageNum++;
 
+#ifndef KICAD_HEADLESS_API
         wxSafeYield(); // displays report message.
+#endif
     }
 
     if( jobfile_writer && m_plotOpts.GetCreateGerberJobFile() )

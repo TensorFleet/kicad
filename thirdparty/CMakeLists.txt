@@ -89,5 +89,16 @@ add_subdirectory( pegtl )
 add_subdirectory( 3dxware_sdk )
 add_subdirectory( rapidcsv )
 add_subdirectory( turtle )
+# The headless core runs every task on the calling thread; compat/inline-thread-pool
+# provides a header-compatible facade in place of the real BS::thread_pool.  Selected
+# by pointing the same INTERFACE target at a different include directory, so no call
+# site changes.
 add_subdirectory( thread-pool )
+
+if( KICAD_HEADLESS_API )
+    set_target_properties( thread-pool PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/compat/inline-thread-pool
+        INTERFACE_SOURCES ${CMAKE_SOURCE_DIR}/compat/inline-thread-pool/bs_thread_pool.hpp
+        )
+endif()
 add_subdirectory( zint )

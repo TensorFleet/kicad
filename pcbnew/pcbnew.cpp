@@ -1326,8 +1326,18 @@ void IFACE::PreloadLibraries( KIWAY* aKiway )
             }
         };
 
+#ifdef KICAD_HEADLESS_API
+    // No background threads in the headless core: run the preload inline and hand
+    // back an already-satisfied future so CancelPreload()/wait() are no-ops.
+    preload();
+
+    std::promise<void> done;
+    done.set_value();
+    m_libraryPreloadReturn = done.get_future();
+#else
     std::future<void> preloadFuture = std::async( std::launch::async, preload );
     m_libraryPreloadReturn = std::move( preloadFuture );
+#endif
 }
 
 
