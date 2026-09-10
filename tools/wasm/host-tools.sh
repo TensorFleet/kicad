@@ -125,10 +125,14 @@ stage_protoc() {
         -Dprotobuf_BUILD_PROTOC_BINARIES=ON
     cmake --build "$BLD/protobuf" -j "$JOBS" --target protoc
 
+    # protobuf's CMake build names the binary protoc-<version>.0 and leaves `protoc` as a
+    # symlink to it (Linux); macOS produces a plain `protoc`.  Accept either, follow the link.
     local built
-    built="$( find "$BLD/protobuf" -maxdepth 2 -type f -name 'protoc' -perm -u+x | head -1 )"
+    built="$( find "$BLD/protobuf" -maxdepth 2 \( -type f -o -type l \) \
+                  \( -name 'protoc' -o -name 'protoc-[0-9]*' \) -perm -u+x \
+              | grep -vE '\.(so|dylib|a)(\.|$)' | sort | head -1 )"
     [ -n "$built" ] || die "protoc was not produced under $BLD/protobuf"
-    cp "$built" "$BIN/protoc"
+    cp -L "$built" "$BIN/protoc"
 
     local got
     got="$( "$BIN/protoc" --version | awk '{print $2}' )"
