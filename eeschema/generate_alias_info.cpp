@@ -47,6 +47,10 @@ static const wxString FieldFormat = wxS(
 static const wxString LinkFormat = wxS( "<a href=\"__HREF__\">__TEXT__</a>" );
 
 
+namespace
+{
+// Internal linkage: pcbnew and eeschema each define a class of this name,
+// and both end up in the same image in the headless build.
 class FOOTPRINT_INFO_GENERATOR
 {
 public:
@@ -277,6 +281,8 @@ private:
     LIB_SYMBOL*                     m_symbol;
     int                             m_unit;
 };
+} // anonymous namespace
+
 
 
 wxString GenerateAliasInfo( SYMBOL_LIBRARY_ADAPTER* aLibs, LIB_ID const& aLibId, int aUnit )

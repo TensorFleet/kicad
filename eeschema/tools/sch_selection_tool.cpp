@@ -2632,7 +2632,7 @@ int SCH_SELECTION_TOOL::SetSelectRect( const TOOL_EVENT& aEvent )
 
 
 // Some navigation actions are allowed in selectMultiple
-const TOOL_ACTION* allowedActions[] = { &ACTIONS::panUp,          &ACTIONS::panDown,
+static const TOOL_ACTION* allowedActions[] = { &ACTIONS::panUp,          &ACTIONS::panDown,
                                         &ACTIONS::panLeft,        &ACTIONS::panRight,
                                         &ACTIONS::cursorUp,       &ACTIONS::cursorDown,
                                         &ACTIONS::cursorLeft,     &ACTIONS::cursorRight,

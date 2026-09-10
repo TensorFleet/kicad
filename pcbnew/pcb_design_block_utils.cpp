@@ -47,7 +47,7 @@
 #include <dialogs/dialog_design_block_properties.h>
 #include <json_common.h>
 
-bool checkOverwriteDb( wxWindow* aFrame, wxString& libname, wxString& newName )
+static bool checkOverwriteDb( wxWindow* aFrame, wxString& libname, wxString& newName )
 {
     wxString msg = wxString::Format( _( "Design block '%s' already exists in library '%s'." ), newName.GetData(),
                                      libname.GetData() );
