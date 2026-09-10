@@ -55,7 +55,7 @@ class PROJECT;
  *
  * The server and the kiway must outlive the host.  Since 11.0
  */
-class KICOMMON_API API_SERVER_HOST
+class API_SERVER_HOST
 {
 public:
     API_SERVER_HOST( KIWAY& aKiway, KICAD_API_SERVER& aServer );
