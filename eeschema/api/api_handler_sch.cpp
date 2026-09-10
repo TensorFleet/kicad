@@ -2327,7 +2327,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_SCH::handleRunSchematicJobExpo
 
     bomJob.m_bomPresetName = wxString::FromUTF8( aCtx.Request.fields().preset_name() );
     bomJob.m_sortField = aCtx.Request.fields().sort_field().empty()
-                                 ? wxS( "Reference" )
+                                 ? wxString( wxS( "Reference" ) )
                                  : wxString::FromUTF8( aCtx.Request.fields().sort_field() );
     bomJob.m_filterString = wxString::FromUTF8( aCtx.Request.fields().filter() );
 
@@ -4465,7 +4465,7 @@ API_HANDLER_SCH::handleAssignFootprints( const HANDLER_CONTEXT<AssignFootprints>
         {
             LIB_ID id( wxString::FromUTF8( assignment.footprint().library_nickname() ),
                        wxString::FromUTF8( assignment.footprint().entry_name() ) );
-            footprint = id.Format();
+            footprint = id.Format().wx_str();
         }
 
         bool matched = false;
