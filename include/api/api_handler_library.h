@@ -40,7 +40,7 @@ class PROJECT;
  *
  * Since 11.0
  */
-class KICOMMON_API API_HANDLER_LIBRARY : public API_HANDLER
+class API_HANDLER_LIBRARY : public API_HANDLER
 {
 public:
     /**
