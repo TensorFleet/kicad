@@ -145,4 +145,54 @@ BOOST_AUTO_TEST_CASE( PublisherDeliversToSubscriber )
     BOOST_CHECK( *second == binary );
 }
 
+BOOST_AUTO_TEST_CASE( PublisherBurstArrivesIntact )
+{
+    // A burst larger than nng's default 16-message pub0 queue must reach a subscriber whose
+    // event loop only gets to read once the burst is over (the events socket carries one
+    // DocumentChanged per commit and a JobProgress per step, and clients detect gaps by sequence).
+    constexpr int    count = 2000;
+    constexpr size_t size = 4096;
+    static_assert( count < KINNG_PUBLISHER::PUBLISHER_SEND_QUEUE_DEPTH );
+
+    KINNG_PUBLISHER publisher( tempSocketUrl( "test-kinng-burst" ) );
+    BOOST_REQUIRE( publisher.Start() );
+
+    SUBSCRIBER subscriber( publisher.SocketPath() );
+    // The subscriber side queues too; make it deeper than the burst so only the publisher's
+    // queue is under test.
+    BOOST_REQUIRE_EQUAL( nng_socket_set_int( subscriber.socket, NNG_OPT_RECVBUF, 8192 ), 0 );
+
+    bool connected = false;
+
+    for( int attempt = 0; attempt < 50 && !connected; ++attempt )
+    {
+        BOOST_REQUIRE( publisher.Publish( "hello" ) );
+        nng_socket_set_ms( subscriber.socket, NNG_OPT_RECVTIMEO, 100 );
+        connected = subscriber.Receive().has_value();
+    }
+
+    BOOST_REQUIRE_MESSAGE( connected, "subscriber never received a message" );
+
+    // Drain any further handshake copies of "hello" before the burst
+    while( subscriber.Receive().has_value() )
+        ;
+
+    nng_socket_set_ms( subscriber.socket, NNG_OPT_RECVTIMEO, 2000 );
+
+    for( int i = 0; i < count; ++i )
+    {
+        std::string msg( size, static_cast<char>( 'a' + ( i % 26 ) ) );
+        msg.replace( 0, 8, wxString::Format( wxS( "%08d" ), i ).ToStdString() );
+        BOOST_REQUIRE( publisher.Publish( msg ) );
+    }
+
+    for( int i = 0; i < count; ++i )
+    {
+        std::optional<std::string> msg = subscriber.Receive();
+        BOOST_REQUIRE_MESSAGE( msg.has_value(), "burst message " << i << " never arrived" );
+        BOOST_REQUIRE_EQUAL( msg->size(), size );
+        BOOST_REQUIRE_EQUAL( msg->substr( 0, 8 ), wxString::Format( wxS( "%08d" ), i ).ToStdString() );
+    }
+}
+
 BOOST_AUTO_TEST_SUITE_END()
