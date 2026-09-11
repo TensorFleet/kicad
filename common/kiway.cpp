@@ -45,6 +45,8 @@
 std::array<KIFACE*, KIWAY::FACE_T::KIWAY_FACE_COUNT> KIWAY::m_kiface;
 std::array<int, KIWAY::FACE_T::KIWAY_FACE_COUNT>     KIWAY::m_kiface_version;
 
+std::array<KIFACE_GETTER_FUNC*, KIWAY::FACE_T::KIWAY_FACE_COUNT> KIWAY::m_staticGetters{};
+
 
 
 KIWAY::KIWAY( int aCtlBits, wxFrame* aTop ):
@@ -204,6 +206,52 @@ PROJECT& KIWAY::Prj() const
 }
 
 
+void KIWAY::RegisterStaticKiface( FACE_T aFaceType, KIFACE_GETTER_FUNC* aGetter )
+{
+    if( (unsigned) aFaceType >= (unsigned) KIWAY_FACE_COUNT )
+    {
+        wxASSERT_MSG( 0, wxT( "caller has a bug, passed a bad aFaceType" ) );
+        return;
+    }
+
+    m_staticGetters[aFaceType] = aGetter;
+}
+
+
+KIFACE* KIWAY::startKiface( FACE_T aFaceId, KIFACE* aKiface )
+{
+    // KIFACE_GETTER_FUNC function comment (API) says the non-NULL is unconditional.
+    wxASSERT_MSG( aKiface, wxT( "attempted DSO has a bug, failed to return a KIFACE*" ) );
+
+    bool startSuccess = false;
+
+    // Give the KIFACE a single chance to do its "process level" initialization.
+    // "Process level" specifically means stay away from any projects in there.
+
+    try
+    {
+        startSuccess = aKiface->OnKifaceStart( &Pgm(), m_ctl, this );
+    }
+    catch( ... )
+    {
+        // OnKiFaceStart may generate an exception
+        // Before we continue and ultimately unload our module to retry we need
+        // to process the exception before we delete the free the memory space the
+        // exception resides in
+        Pgm().HandleException( std::current_exception() );
+    }
+
+    if( !startSuccess )
+    {
+        // Usually means canceled initial global library setup
+        // But it could have been an exception/failure
+        return nullptr;
+    }
+
+    return m_kiface[aFaceId] = aKiface;
+}
+
+
 KIFACE* KIWAY::KiFACE( FACE_T aFaceId, bool doLoad )
 {
     // Since this will be called from python, cannot assume that code will
@@ -218,6 +266,20 @@ KIFACE* KIWAY::KiFACE( FACE_T aFaceId, bool doLoad )
     if( m_kiface[aFaceId] )
         return m_kiface[aFaceId];
 
+    // A KIFACE linked into this image needs no DSO; ask it directly.  This is how the
+    // headless build works, where there is nothing to dlopen.
+    if( KIFACE_GETTER_FUNC* staticGetter = m_staticGetters[aFaceId] )
+    {
+        return startKiface( aFaceId,
+                            staticGetter( &m_kiface_version[aFaceId], KIFACE_VERSION, &Pgm() ) );
+    }
+
+#ifdef KICAD_HEADLESS_API
+    // Nothing to dlopen: every kiface is linked into this image and registered above.  The
+    // Emscripten wxBase is built with wxUSE_DYNAMIC_LOADER=OFF, so wxDynamicLibrary is not
+    // merely unused here, it does not exist.
+    (void) doLoad;
+#else
     // DSO with KIFACE has not been loaded yet, does caller want to load it?
     if( doLoad )
     {
@@ -283,37 +345,14 @@ KIFACE* KIWAY::KiFACE( FACE_T aFaceId, bool doLoad )
 
             KIFACE* kiface = ki_getter( &m_kiface_version[aFaceId], KIFACE_VERSION, &Pgm() );
 
-            // KIFACE_GETTER_FUNC function comment (API) says the non-NULL is unconditional.
-            wxASSERT_MSG( kiface, wxT( "attempted DSO has a bug, failed to return a KIFACE*" ) );
-
             wxDllType dsoHandle = dso.Detach();
 
-            bool startSuccess = false;
-
-            // Give the DSO a single chance to do its "process level" initialization.
-            // "Process level" specifically means stay away from any projects in there.
-
-            try
+            if( KIFACE* started = startKiface( aFaceId, kiface ) )
             {
-                startSuccess = kiface->OnKifaceStart( &Pgm(), m_ctl, this );
-            }
-            catch (...)
-            {
-                // OnKiFaceStart may generate an exception
-                // Before we continue and ultimately unload our module to retry we need
-                // to process the exception before we delete the free the memory space the
-                // exception resides in
-                Pgm().HandleException( std::current_exception() );
-            }
-
-            if( startSuccess )
-            {
-                return m_kiface[aFaceId] = kiface;
+                return started;
             }
             else
             {
-                // Usually means canceled initial global library setup
-                // But it could have been an exception/failure
                 // Let the module go out of scope to unload
                 dso.Attach( dsoHandle );
 
@@ -321,6 +360,7 @@ KIFACE* KIWAY::KiFACE( FACE_T aFaceId, bool doLoad )
             }
         }
     }
+#endif // KICAD_HEADLESS_API
 
     return nullptr;
 }

@@ -35,7 +35,13 @@
 #include <wx/bitmap.h>
 #include <wx/font.h>        // required for propgrid
 #include <wx/validate.h>    // required for propgrid
+#ifdef KICAD_HEADLESS_API
+// wxPropertyGrid is not part of a wxBase-only build; the enumerated-property label/value
+// list has an in-tree stand-in with the same name and API.
+#include <properties/pg_choices_headless.h>
+#else
 #include <wx/propgrid/property.h>
+#endif
 
 #ifdef DEBUG
 #include <wx/wxcrt.h>

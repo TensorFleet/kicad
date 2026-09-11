@@ -20,7 +20,9 @@
 #include <singleton.h>
 #include <advanced_config.h>
 #include <bs_thread_pool.hpp>
+#ifndef KICAD_HEADLESS_API
 #include <kicad_gl/gl_context_mgr.h>
+#endif
 #include <thread_pool.h>
 
 
@@ -46,12 +48,14 @@ void KICAD_SINGLETON::Shutdown()
         InvalidateKiCadThreadPool();
     }
 
+#ifndef KICAD_HEADLESS_API
     if( m_GLContextManager )
     {
         m_GLContextManager->DeleteAll();
         delete m_GLContextManager;
         m_GLContextManager = nullptr;
     }
+#endif
 }
 
 
@@ -67,5 +71,7 @@ void KICAD_SINGLETON::Init()
                                                              BS::os_thread_priority::below_normal );
                                                  } );
 
+#ifndef KICAD_HEADLESS_API
     m_GLContextManager = new GL_CONTEXT_MANAGER();
+#endif
 }

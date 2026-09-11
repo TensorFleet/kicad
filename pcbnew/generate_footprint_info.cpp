@@ -101,6 +101,10 @@ std::optional<wxString> GetFootprintDocumentationURL( const FOOTPRINT& aFootprin
 }
 
 
+namespace
+{
+// Internal linkage: pcbnew and eeschema each define a class of this name,
+// and both end up in the same image in the headless build.
 class FOOTPRINT_INFO_GENERATOR
 {
 public:
@@ -186,6 +190,8 @@ private:
 
     const FOOTPRINT* m_footprint;
 };
+} // anonymous namespace
+
 
 
 wxString GenerateFootprintInfo( FOOTPRINT_LIBRARY_ADAPTER* aAdapter, LIB_ID const& aLibId )

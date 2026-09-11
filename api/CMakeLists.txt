@@ -61,9 +61,18 @@ foreach( PROTO_SRC ${KIAPI_PROTO_SRCS} )
     set( KIAPI_PROTO_SRC_FULLPATHS ${KIAPI_PROTO_SRC_FULLPATHS} ${CMAKE_CURRENT_SOURCE_DIR}/proto/${PROTO_SRC} )
 endforeach ()
 
+# A static kiapi is linked into a single image, so there is nothing to export and
+# the dllexport_decl attribute would only make protoc emit the visibility macro on
+# every generated symbol for no reason.
+if( KICAD_HEADLESS_API )
+    set( KIAPI_PROTOC_CPP_OUT "${KIAPI_CPP_BASEPATH}" )
+else()
+    set( KIAPI_PROTOC_CPP_OUT "dllexport_decl=KIAPI_IMPORTEXPORT:${KIAPI_CPP_BASEPATH}" )
+endif()
+
 add_custom_command( COMMAND ${CMAKE_COMMAND} -E make_directory ${KIAPI_CPP_BASEPATH}
     COMMAND ${Protobuf_PROTOC_EXECUTABLE}
-    --cpp_out=dllexport_decl=KIAPI_IMPORTEXPORT:${KIAPI_CPP_BASEPATH}
+    --cpp_out=${KIAPI_PROTOC_CPP_OUT}
     --proto_path=${CMAKE_CURRENT_SOURCE_DIR}/proto
     --experimental_allow_proto3_optional
     ${KIAPI_PROTO_SRCS}
@@ -74,7 +83,8 @@ add_custom_command( COMMAND ${CMAKE_COMMAND} -E make_directory ${KIAPI_CPP_BASEP
     )
 
 # kiapi must be a shared DLL because the protobuf messages can only be initialized once
-add_library( kiapi SHARED
+# -- except in the headless build, where everything ends up in one static image anyway.
+add_library( kiapi ${KICAD_LIB_TYPE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/import_export.h
     ${KIAPI_CPP_SRCS}
     ${KIAPI_CPP_HEADERS}

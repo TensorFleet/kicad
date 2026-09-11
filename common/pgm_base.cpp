@@ -31,7 +31,9 @@
 #include <wx/dir.h>
 #include <wx/filename.h>
 #include <wx/msgdlg.h>
+#ifndef KICAD_HEADLESS_API
 #include <wx/propgrid/propgrid.h>
+#endif
 #include <wx/stdpaths.h>
 #include <wx/sysopt.h>
 #include <wx/filedlg.h>
@@ -39,10 +41,14 @@
 #include <wx/tooltip.h>
 
 #include <advanced_config.h>
+// The out-of-process plugin manager, the Python interpreter probe, the crash
+// reporter and libcurl are all dropped from the headless core.
+#ifndef KICAD_HEADLESS_API
 #include <api/api_plugin_manager.h>
-#include <api/api_server.h>
 #include <api/python_manager.h>
 #include <app_monitor.h>
+#endif
+#include <api/api_server.h>
 #include <background_jobs_monitor.h>
 #include <bitmaps.h>
 #include <build_version.h>
@@ -50,7 +56,9 @@
 #include <confirm.h>
 #include <core/arraydim.h>
 #include <id.h>
+#ifndef KICAD_HEADLESS_API
 #include <kicad_curl/kicad_curl.h>
+#endif
 #include <kiplatform/policy.h>
 #include <libraries/library_manager.h>
 #include <macros.h>
@@ -182,9 +190,11 @@ PGM_BASE::~PGM_BASE()
 
 void PGM_BASE::Destroy()
 {
+#ifndef KICAD_HEADLESS_API
     KICAD_CURL::Cleanup();
 
     APP_MONITOR::SENTRY::Instance()->Cleanup();
+#endif
 
 #ifdef _MSC_VER
     winrt::uninit_apartment();
@@ -350,9 +360,11 @@ bool PGM_BASE::InitPgm( bool aHeadless, bool aIsUnitTest )
     // In particular, the user cache path is the most likely to be hit by startup code
     PATHS::EnsureUserPathsExist();
 
+#ifndef KICAD_HEADLESS_API
     KICAD_CURL::Init();
 
     APP_MONITOR::SENTRY::Instance()->Init();
+#endif
 
     // Initialize the singleton instance
     m_singleton.Init();
@@ -365,12 +377,18 @@ bool PGM_BASE::InitPgm( bool aHeadless, bool aIsUnitTest )
     else
         pgm_name = wxFileName( App().argv[0] ).GetName().Lower();
 
+#ifndef KICAD_HEADLESS_API
     APP_MONITOR::SENTRY::Instance()->AddTag( "kicad.app", pgm_name );
+#endif
 
+#ifndef KICAD_HEADLESS_API
+    // wxImage's decoders live in wxCore; a wxBase-only build has none to register.
     wxInitAllImageHandlers();
+#endif
 
-#if !wxCHECK_VERSION( 3, 3, 0 )
+#if !wxCHECK_VERSION( 3, 3, 0 ) && !defined( KICAD_HEADLESS_API )
     // Without this the wxPropertyGridManager segfaults on Windows.
+    // There is no property grid in the headless core.
     if( !wxPGGlobalVars )
         wxPGInitResourceModule();
 #endif
@@ -434,10 +452,13 @@ bool PGM_BASE::InitPgm( bool aHeadless, bool aIsUnitTest )
 
     m_settings_manager = std::make_unique<SETTINGS_MANAGER>();
     m_library_manager = std::make_unique<LIBRARY_MANAGER>();
+#ifndef KICAD_HEADLESS_API
+    // Both are wxWindow-owning notification UIs; nothing on the headless API path reads them.
     m_background_jobs_monitor = std::make_unique<BACKGROUND_JOBS_MONITOR>();
     m_notifications_manager = std::make_unique<NOTIFICATIONS_MANAGER>();
 
     m_plugin_manager = std::make_unique<API_PLUGIN_MANAGER>( &App() );
+#endif
 
     // Our unit test mocks break if we continue
     // A bug caused InitPgm to terminate early in unit tests and the mocks are...simplistic
@@ -459,9 +480,11 @@ bool PGM_BASE::InitPgm( bool aHeadless, bool aIsUnitTest )
     // Load common settings from disk after setting up env vars
     GetSettingsManager().Load( commonSettings );
 
+#ifndef KICAD_HEADLESS_API
     // If user doesn't have a saved Python interpreter, try (potentially again) to find one
     if( commonSettings->m_Api.python_interpreter.IsEmpty() )
         commonSettings->m_Api.python_interpreter = PYTHON_MANAGER::FindPythonInterpreter();
+#endif
 
     // Init user language *before* calling loadSettings, because
     // env vars could be incorrectly initialized on Linux
@@ -475,14 +498,18 @@ bool PGM_BASE::InitPgm( bool aHeadless, bool aIsUnitTest )
 
     ReadPdfBrowserInfos();      // needs GetCommonSettings()
 
+#ifndef KICAD_HEADLESS_API
     GetNotificationsManager().Load();
+#endif
 
     // TODO(JE): Remove this if apps are refactored to not assume Prj() always works
     // Need to create a project early for now (it can have an empty path for the moment)
     GetSettingsManager().LoadProject( "" );
 
+#ifndef KICAD_HEADLESS_API
     if( commonSettings->m_Api.enable_server )
         m_plugin_manager->ReloadPlugins();
+#endif
 
     // This sets the maximum tooltip display duration to 10s (up from 5) but only affects
     // Windows as other platforms display tooltips while the mouse is not moving
@@ -811,15 +838,19 @@ void PGM_BASE::HandleException( std::exception_ptr aPtr, bool aUnhandled )
     {
         wxLogError( ioe.What() );
 
+#ifndef KICAD_HEADLESS_API
         if( aUnhandled )
         {
             // Log this IO_ERROR escaped our usual uses (bad)
             APP_MONITOR::SENTRY::Instance()->LogException( ioe.What(), aUnhandled );
         }
+#endif
     }
     catch( const std::exception& e )
     {
+#ifndef KICAD_HEADLESS_API
         APP_MONITOR::SENTRY::Instance()->LogException( e.what(), aUnhandled );
+#endif
 
         wxLogError( wxT( "Unhandled exception class: %s  what: %s" ),
                     From_UTF8( typeid( e ).name() ), From_UTF8( e.what() ) );
@@ -829,10 +860,12 @@ void PGM_BASE::HandleException( std::exception_ptr aPtr, bool aUnhandled )
         // We really shouldn't have these but just in case...
         wxLogError( wxT( "Unhandled exception of unknown type" ) );
 
+#ifndef KICAD_HEADLESS_API
         if( aUnhandled )
         {
             APP_MONITOR::SENTRY::Instance()->LogException( "Unhandled exception of unknown type", aUnhandled );
         }
+#endif
     }
 }
 
@@ -887,6 +920,11 @@ void PGM_BASE::WritePdfBrowserInfos()
 
 void PGM_BASE::PreloadDesignBlockLibraries( KIWAY* aKiway )
 {
+#ifdef KICAD_HEADLESS_API
+    // The preload only exists to warm the GUI's library trees, and it reports progress through
+    // the background job monitor, which this build does not have.  The adapters load on demand.
+    (void) aKiway;
+#else
     // TODO(JE) much of this code can be shared across the 3 preloads
     constexpr static int interval = 150;
     constexpr static int timeLimit = 120000;
@@ -963,6 +1001,7 @@ void PGM_BASE::PreloadDesignBlockLibraries( KIWAY* aKiway )
     thread_pool& tp = GetKiCadThreadPool();
     m_libraryPreloadInProgress.store( true );
     m_libraryPreloadReturn = tp.submit_task( preload );
+#endif
 }
 
 

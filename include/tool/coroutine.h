@@ -23,6 +23,14 @@
 #ifndef __COROUTINE_H
 #define __COROUTINE_H
 
+#ifdef KICAD_SYNC_COROUTINE
+
+// The headless build has no libcontext port; COROUTINE becomes a run-to-completion
+// stand-in with the same API.  See include/tool/coroutine_sync.h.
+#include <tool/coroutine_sync.h>
+
+#else
+
 #include <cassert>
 #include <cstdlib>
 #include <type_traits>
@@ -639,5 +647,7 @@ private:
     size_t      m_asanCallerStackSize;
 #endif
 };
+
+#endif // KICAD_SYNC_COROUTINE
 
 #endif

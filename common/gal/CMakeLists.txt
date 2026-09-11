@@ -9,16 +9,33 @@ set( FONT_SRCS
     ../font/text_attributes.cpp
 	)
 
+# GAL_SRCS is assembled in the original order with the renderer-only sources appended
+# in place, so that turning KICAD_HEADLESS_API off reproduces the default build's link
+# line exactly.  The renderers need OpenGL, Cairo/Pixman and a wxGLCanvas; what is left
+# is the view/painter/font machinery the plotters and the API path use.
 set( GAL_SRCS
     # Common part
     ../callback_gal.cpp
     painter.cpp
-    cursors.cpp
+    )
+
+if( NOT KICAD_HEADLESS_API )
+    list( APPEND GAL_SRCS cursors.cpp )
+endif()
+
+list( APPEND GAL_SRCS
     gal_display_options.cpp
     graphics_abstraction_layer.cpp
-    hidpi_gl_canvas.cpp
-    hidpi_gl_3D_canvas.cpp
+    )
 
+if( NOT KICAD_HEADLESS_API )
+    list( APPEND GAL_SRCS
+        hidpi_gl_canvas.cpp
+        hidpi_gl_3D_canvas.cpp
+        )
+endif()
+
+list( APPEND GAL_SRCS
     ../view/view.cpp
     ../view/view_controls.cpp
     ../view/view_group.cpp
@@ -27,33 +44,37 @@ set( GAL_SRCS
     ../view/view_item.cpp
 
     ${FONT_SRCS}
-
-    3d/camera.cpp
-
-    # OpenGL GAL
-    opengl/opengl_gal.cpp
-    opengl/gl_resources.cpp
-
-    opengl/shader.cpp
-    opengl/vertex_item.cpp
-    opengl/vertex_container.cpp
-    opengl/cached_container.cpp
-    opengl/cached_container_gpu.cpp
-    opengl/cached_container_ram.cpp
-    opengl/noncached_container.cpp
-    opengl/vertex_manager.cpp
-    opengl/gpu_manager.cpp
-    opengl/antialiasing.cpp
-    opengl/opengl_compositor.cpp
-    opengl/utils.cpp
-
-    # Cairo GAL
-    cairo/cairo_gal.cpp
-    cairo/cairo_compositor.cpp
-    cairo/cairo_print.cpp
     )
 
-add_library( gal SHARED ${GAL_SRCS} )
+if( NOT KICAD_HEADLESS_API )
+    list( APPEND GAL_SRCS
+        3d/camera.cpp
+
+        # OpenGL GAL
+        opengl/opengl_gal.cpp
+        opengl/gl_resources.cpp
+
+        opengl/shader.cpp
+        opengl/vertex_item.cpp
+        opengl/vertex_container.cpp
+        opengl/cached_container.cpp
+        opengl/cached_container_gpu.cpp
+        opengl/cached_container_ram.cpp
+        opengl/noncached_container.cpp
+        opengl/vertex_manager.cpp
+        opengl/gpu_manager.cpp
+        opengl/antialiasing.cpp
+        opengl/opengl_compositor.cpp
+        opengl/utils.cpp
+
+        # Cairo GAL
+        cairo/cairo_gal.cpp
+        cairo/cairo_compositor.cpp
+        cairo/cairo_print.cpp
+        )
+endif()
+
+add_library( gal ${KICAD_LIB_TYPE} ${GAL_SRCS} )
 
 if( KICAD_USE_PCH )
     target_precompile_headers( gal
@@ -144,15 +165,18 @@ function( add_shader outTarget inFile shaderName )
     target_include_directories( ${outTarget} PUBLIC ${CMAKE_BINARY_DIR}/include/gal/shaders/ )
 endfunction()
 
-add_shader( gal kicad_frag.glsl glsl_kicad_frag )
-add_shader( gal kicad_vert.glsl glsl_kicad_vert )
-add_shader( gal smaa_base.glsl glsl_smaa_base )
-add_shader( gal smaa_pass_1_frag_color.glsl glsl_smaa_pass_1_frag_color )
-add_shader( gal smaa_pass_1_frag_luma.glsl glsl_smaa_pass_1_frag_luma )
-add_shader( gal smaa_pass_1_vert.glsl glsl_smaa_pass_1_vert )
-add_shader( gal smaa_pass_2_frag.glsl glsl_smaa_pass_2_frag )
-add_shader( gal smaa_pass_2_vert.glsl glsl_smaa_pass_2_vert )
-add_shader( gal smaa_pass_3_frag.glsl glsl_smaa_pass_3_frag )
-add_shader( gal smaa_pass_3_vert.glsl glsl_smaa_pass_3_vert )
-add_shader( gal xor_diff_frag.glsl glsl_xor_diff_frag )
-add_shader( gal xor_diff_vert.glsl glsl_xor_diff_vert )
+# The shaders belong to the OpenGL GAL, which the headless core does not build.
+if( NOT KICAD_HEADLESS_API )
+    add_shader( gal kicad_frag.glsl glsl_kicad_frag )
+    add_shader( gal kicad_vert.glsl glsl_kicad_vert )
+    add_shader( gal smaa_base.glsl glsl_smaa_base )
+    add_shader( gal smaa_pass_1_frag_color.glsl glsl_smaa_pass_1_frag_color )
+    add_shader( gal smaa_pass_1_frag_luma.glsl glsl_smaa_pass_1_frag_luma )
+    add_shader( gal smaa_pass_1_vert.glsl glsl_smaa_pass_1_vert )
+    add_shader( gal smaa_pass_2_frag.glsl glsl_smaa_pass_2_frag )
+    add_shader( gal smaa_pass_2_vert.glsl glsl_smaa_pass_2_vert )
+    add_shader( gal smaa_pass_3_frag.glsl glsl_smaa_pass_3_frag )
+    add_shader( gal smaa_pass_3_vert.glsl glsl_smaa_pass_3_vert )
+    add_shader( gal xor_diff_frag.glsl glsl_xor_diff_frag )
+    add_shader( gal xor_diff_vert.glsl glsl_xor_diff_vert )
+endif()

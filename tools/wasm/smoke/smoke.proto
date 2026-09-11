@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package fpwasm.smoke;
+
+message Board
+{
+    string          name  = 1;
+    int32           layers = 2;
+    repeated string nets  = 3;
+}

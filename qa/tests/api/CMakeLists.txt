@@ -23,6 +23,7 @@ set( QA_API_SRCS
     test_api_events.cpp
     test_api_handler_pcb.cpp
     test_api_server.cpp
+    test_api_inprocess.cpp
     test_api_jobs.cpp
     test_api_libraries.cpp
     test_api_schematic_ops.cpp

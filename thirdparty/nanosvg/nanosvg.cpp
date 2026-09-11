@@ -37,7 +37,51 @@
 #include <string>
 #include <algorithm>
 #include <memory>
+#ifdef NANOSVG_NO_FONTCONFIG
+// KiCad: the headless API core has no Fontconfig (there is none in the Emscripten
+// dependency set).  Text in an imported SVG is skipped; everything else parses as usual.
+typedef struct _FcConfig FcConfig;
+typedef unsigned char    FcChar8;
+typedef unsigned int     FcChar32;
+
+#define FC_WEIGHT_REGULAR 400
+
+static inline int FcWeightFromOpenType( int aWeight ) { return aWeight; }
+
+/// Minimal UTF-8 decoder, the one thing nsvg__textCodepoints() borrowed from Fontconfig.
+static inline int FcUtf8ToUcs4( const FcChar8* aSrc, FcChar32* aDst, int aLen )
+{
+    if( aLen <= 0 )
+        return -1;
+
+    unsigned char c = aSrc[0];
+    int           extra;
+    FcChar32      value;
+
+    if( c < 0x80 )      { *aDst = c;          return 1;              }
+    else if( c < 0xc2 ) { return -1;                                 }
+    else if( c < 0xe0 ) { extra = 1; value = c & 0x1f;               }
+    else if( c < 0xf0 ) { extra = 2; value = c & 0x0f;               }
+    else if( c < 0xf5 ) { extra = 3; value = c & 0x07;               }
+    else                { return -1;                                 }
+
+    if( aLen < extra + 1 )
+        return -1;
+
+    for( int i = 1; i <= extra; ++i )
+    {
+        if( ( aSrc[i] & 0xc0 ) != 0x80 )
+            return -1;
+
+        value = ( value << 6 ) | ( aSrc[i] & 0x3f );
+    }
+
+    *aDst = value;
+    return extra + 1;
+}
+#else
 #include <fontconfig/fontconfig.h>
+#endif
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_OUTLINE_H

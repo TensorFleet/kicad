@@ -34,12 +34,15 @@
 // kicad_curl.h can create conflicts for some defines, at least on Windows
 // so we are using here 2 proxy functions to know Curl version to avoid
 // including kicad_curl.h to know Curl version
+// The headless core links neither libcurl nor OpenCascade nor ngspice.
+#ifndef KICAD_HEADLESS_API
 extern std::string GetKicadCurlVersion();
 extern std::string GetCurlLibVersion();
 
 #include <Standard_Version.hxx>
 
 #include <ngspice/sharedspice.h>
+#endif
 
 // The include file version.h is always created even if the repo version cannot be
 // determined.  In this case KICAD_VERSION_FULL will default to the KICAD_VERSION
@@ -201,8 +204,10 @@ wxString GetVersionInfoData( const wxString& aTitle, bool aHtml, bool aBrief )
     aMsg << indent4 << "HarfBuzz " << KIFONT::VERSION_INFO::HarfBuzz() << eol;
     aMsg << indent4 << "FontConfig " << KIFONT::VERSION_INFO::FontConfig() << eol;
 
+#ifndef KICAD_HEADLESS_API
     if( !aBrief )
         aMsg << indent4 << GetKicadCurlVersion() << eol;
+#endif
 
     aMsg << eol;
 
@@ -301,10 +306,14 @@ wxString GetVersionInfoData( const wxString& aTitle, bool aHtml, bool aBrief )
          << ( BOOST_VERSION / 100 % 1000 ) << wxT( "." )
          << ( BOOST_VERSION % 100 ) << eol;
 
+#ifndef KICAD_HEADLESS_API
     aMsg << indent4 << "OCC: " << OCC_VERSION_COMPLETE << eol;
     aMsg << indent4 << "Curl: " << GetCurlLibVersion() << eol;
+#endif
 
-#if defined( NGSPICE_BUILD_VERSION )
+#if defined( KICAD_HEADLESS_API )
+    // no simulator in the headless core
+#elif defined( NGSPICE_BUILD_VERSION )
     aMsg << indent4 << "ngspice: " << NGSPICE_BUILD_VERSION << eol;
 #elif defined( NGSPICE_HAVE_CONFIG_H )
     #undef HAVE_STRNCASECMP     /* is redefined in ngspice/config.h */

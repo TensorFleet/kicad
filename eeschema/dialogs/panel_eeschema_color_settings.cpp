@@ -49,7 +49,7 @@
 #include <wx/msgdlg.h>
 
 
-std::set<int> g_excludedLayers =
+static std::set<int> g_excludedLayers =
         {
             LAYER_NOTES_BACKGROUND,
             LAYER_DANGLING,

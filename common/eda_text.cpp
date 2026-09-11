@@ -58,7 +58,10 @@
 
 #include <wx/debug.h> // for wxASSERT
 #include <wx/string.h>
-#include <wx/url.h> // for wxURL
+#include <wx/uri.h> // for wxURI, which is what ValidateHyperlink() actually uses
+#ifndef KICAD_HEADLESS_API
+#include <wx/url.h> // for wxURL (wxUSE_URL needs wxUSE_SOCKETS, off in the wasm wxBase)
+#endif
 #include <io/kicad/kicad_io_utils.h>
 #include "font/kicad_font_name.h"
 #include "font/fontconfig.h"

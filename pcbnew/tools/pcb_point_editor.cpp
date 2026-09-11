@@ -283,6 +283,10 @@ private:
 };
 
 
+namespace
+{
+// Internal linkage: pcbnew and eeschema each define a class of this name,
+// and both end up in the same image in the headless build.
 class RECTANGLE_POINT_EDIT_BEHAVIOR : public POINT_EDIT_BEHAVIOR
 {
 public:
@@ -588,6 +592,8 @@ public:
 private:
     PCB_SHAPE& m_rectangle;
 };
+} // anonymous namespace
+
 
 
 class ZONE_POINT_EDIT_BEHAVIOR : public POLYGON_POINT_EDIT_BEHAVIOR
@@ -1899,6 +1905,10 @@ private:
 /**
  * A textbox is edited as a rectnagle when it is orthogonally aligned
  */
+namespace
+{
+// Internal linkage: pcbnew and eeschema each define a class of this name,
+// and both end up in the same image in the headless build.
 class TEXTBOX_POINT_EDIT_BEHAVIOR : public POINT_EDIT_BEHAVIOR
 {
 public:
@@ -1940,6 +1950,8 @@ public:
 private:
     PCB_TEXTBOX& m_textbox;
 };
+} // anonymous namespace
+
 
 class SHAPE_GROUP_POINT_EDIT_BEHAVIOR : public POINT_EDIT_BEHAVIOR
 {

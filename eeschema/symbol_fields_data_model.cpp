@@ -21,8 +21,10 @@
 
 #include <wx/string.h>
 #include <wx/debug.h>
+#ifndef KICAD_HEADLESS_API
 #include <wx/grid.h>
 #include <wx/settings.h>
+#endif
 #include <common.h>
 #include <widgets/wx_grid.h>
 #include <sch_reference_list.h>
@@ -55,6 +57,7 @@ wxString SYMBOL_FIELDS_EDITOR_GRID_DATA_MODEL::getItemIdentifier( const SCH_REFE
 }
 
 
+#ifndef KICAD_HEADLESS_API
 wxGridCellAttr* SYMBOL_FIELDS_EDITOR_GRID_DATA_MODEL::GetAttr( int aRow, int aCol, wxGridCellAttr::wxAttrKind aKind )
 {
     wxGridCellAttr* attr = nullptr;
@@ -154,6 +157,7 @@ wxGridCellAttr* SYMBOL_FIELDS_EDITOR_GRID_DATA_MODEL::GetAttr( int aRow, int aCo
 
     return applyCellDecorations( enhanceAttr( attr, aRow, aCol, aKind ), aRow, aCol );
 }
+#endif  // KICAD_HEADLESS_API
 
 
 void SYMBOL_FIELDS_EDITOR_GRID_DATA_MODEL::SetValue( int aRow, int aCol, const wxString& aValue )
@@ -535,6 +539,7 @@ void SYMBOL_FIELDS_EDITOR_GRID_DATA_MODEL::RebuildRows()
     if( !m_rebuildsEnabled )
         return;
 
+#ifndef KICAD_HEADLESS_API
     if( GetView() )
     {
         // Commit any pending in-place edits before the row gets moved out from under
@@ -544,6 +549,7 @@ void SYMBOL_FIELDS_EDITOR_GRID_DATA_MODEL::RebuildRows()
         wxGridTableMessage msg( this, wxGRIDTABLE_NOTIFY_ROWS_DELETED, 0, m_rows.size() );
         GetView()->ProcessTableMessage( msg );
     }
+#endif
 
     m_rows.clear();
 
@@ -657,11 +663,13 @@ void SYMBOL_FIELDS_EDITOR_GRID_DATA_MODEL::RebuildRows()
             m_rows.emplace_back( SYMBOL_FIELDS_TABLE_DATA_MODEL_ROW( ref, ROW_STATE::NON_EXPANDABLE ) );
     }
 
+#ifndef KICAD_HEADLESS_API
     if( GetView() )
     {
         wxGridTableMessage msg( this, wxGRIDTABLE_NOTIFY_ROWS_APPENDED, m_rows.size() );
         GetView()->ProcessTableMessage( msg );
     }
+#endif
 
     Sort();
 }
@@ -957,11 +965,13 @@ bool SYMBOL_FIELDS_EDITOR_GRID_DATA_MODEL::DeleteRows( size_t aPosition, size_t 
         m_dataStore.clear();
         m_symbolsList.Clear();
 
+#ifndef KICAD_HEADLESS_API
         if( GetView() )
         {
             wxGridTableMessage msg( this, wxGRIDTABLE_NOTIFY_ROWS_DELETED, aPosition, aNumRows );
             GetView()->ProcessTableMessage( msg );
         }
+#endif
     }
     else
     {
