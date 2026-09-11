@@ -571,6 +571,13 @@ message SchematicSymbol
   bool units_locked = 16;
   repeated SchematicUnitDisplayName unit_display_names = 17;
   bool embedded_fonts = 18;
+
+  // Pin display settings belong to the library definition.  Clients placing a symbol must copy
+  // them onto SchematicSymbolInstance as well; otherwise deserializing the instance changes its
+  // embedded library symbol and ERC reports a false library mismatch.
+  bool show_pin_names = 19;
+  bool show_pin_numbers = 20;
+  kiapi.common.types.Distance pin_name_offset = 21;
 }
 
 message SchematicSymbolTransform

@@ -665,6 +665,10 @@ void PackLibSymbol( kiapi::schematic::types::SchematicSymbol* aOutput, const LIB
 
     aOutput->set_units_locked( aInput->UnitsLocked() );
     aOutput->set_embedded_fonts( aInput->GetAreFontsEmbedded() );
+    aOutput->set_show_pin_names( aInput->GetShowPinNames() );
+    aOutput->set_show_pin_numbers( aInput->GetShowPinNumbers() );
+    kiapi::common::PackDistance( *aOutput->mutable_pin_name_offset(),
+                                aInput->GetPinNameOffset(), schIUScale );
 
     for( const auto& [unit, displayName] : aInput->GetUnitDisplayNames() )
     {
@@ -772,6 +776,9 @@ std::unique_ptr<LIB_SYMBOL> UnpackLibSymbol( const kiapi::schematic::types::Sche
 
     libSymbol->LockUnits( def.units_locked() );
     libSymbol->SetAreFontsEmbedded( def.embedded_fonts() );
+    libSymbol->SetShowPinNames( def.show_pin_names() );
+    libSymbol->SetShowPinNumbers( def.show_pin_numbers() );
+    libSymbol->SetPinNameOffset( UnpackDistance( def.pin_name_offset(), schIUScale ) );
 
     for( const SchematicUnitDisplayName& displayName : def.unit_display_names() )
         libSymbol->GetUnitDisplayNames()[displayName.unit()] = wxString::FromUTF8( displayName.name() );

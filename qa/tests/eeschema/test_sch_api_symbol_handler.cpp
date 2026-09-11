@@ -26,6 +26,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <api/api_handler_symbol.h>
+#include <api/api_sch_utils.h>
 #include <api/api_utils.h>
 #include <api/headless_symbol_context.h>
 #include <api/common/commands/editor_commands.pb.h>
@@ -48,6 +49,9 @@ struct API_HANDLER_SYMBOL_FIXTURE
         std::unique_ptr<LIB_SYMBOL> symbol = std::make_unique<LIB_SYMBOL>( wxS( "R" ) );
         m_libId = LIB_ID( wxS( "Device" ), wxS( "R" ) );
         symbol->SetLibId( m_libId );
+        symbol->SetShowPinNames( true );
+        symbol->SetShowPinNumbers( false );
+        symbol->SetPinNameOffset( 1234 );
 
         for( int i = 1; i <= 2; ++i )
         {
@@ -180,6 +184,14 @@ BOOST_AUTO_TEST_CASE( GetItemsReturnsChildrenAndDefinition )
     BOOST_REQUIRE( response.items( 0 ).UnpackTo( &definition ) );
     BOOST_CHECK_EQUAL( definition.id().entry_name(), "R" );
     BOOST_CHECK_EQUAL( definition.unit_count(), 1u );
+    BOOST_CHECK_EQUAL( definition.show_pin_names(), m_symbol->GetShowPinNames() );
+    BOOST_CHECK_EQUAL( definition.show_pin_numbers(), m_symbol->GetShowPinNumbers() );
+
+    std::unique_ptr<LIB_SYMBOL> unpacked = UnpackLibSymbol( definition );
+    BOOST_REQUIRE( unpacked );
+    BOOST_CHECK_EQUAL( unpacked->GetShowPinNames(), m_symbol->GetShowPinNames() );
+    BOOST_CHECK_EQUAL( unpacked->GetShowPinNumbers(), m_symbol->GetShowPinNumbers() );
+    BOOST_CHECK_EQUAL( unpacked->GetPinNameOffset(), m_symbol->GetPinNameOffset() );
 
     int definitionPins = 0;
 

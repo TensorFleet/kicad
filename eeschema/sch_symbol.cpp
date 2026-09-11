@@ -861,6 +861,9 @@ void SCH_SYMBOL::Serialize( kiapi::schematic::types::SchematicSymbolInstance& aS
 
         def->set_units_locked( m_part->UnitsLocked() );
         def->set_embedded_fonts( m_part->GetAreFontsEmbedded() );
+        def->set_show_pin_names( m_part->GetShowPinNames() );
+        def->set_show_pin_numbers( m_part->GetShowPinNumbers() );
+        PackDistance( *def->mutable_pin_name_offset(), m_part->GetPinNameOffset(), schIUScale );
 
         for( const auto& [unit, displayName] : m_part->GetUnitDisplayNames() )
         {
