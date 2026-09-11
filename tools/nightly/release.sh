@@ -113,9 +113,11 @@ fi
 
 # ------------------------------------------------------------------ 3. prune (by age only)
 cutoff="$(date -u -d "-${KEEP_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)"
-# (gh's --jq takes a bare expression, no --arg; the timestamps compare as ISO-8601 strings)
-gh release list --limit 500 --json tagName,createdAt \
-  --jq ".[] | select(.tagName | startswith(\"nightly-\")) | select(.createdAt < \"$cutoff\") | .tagName" \
+# publishedAt, not createdAt: GitHub sets a release's created_at to the date of the tagged
+# COMMIT, so a backfill of an old pin would look old the moment it was published and be pruned
+# the next night.  (gh's --jq takes a bare expression, no --arg; ISO-8601 strings compare.)
+gh release list --limit 500 --json tagName,publishedAt \
+  --jq ".[] | select(.tagName | startswith(\"nightly-\")) | select(.publishedAt < \"$cutoff\") | .tagName" \
   | while read -r old; do
       [ -n "$old" ] || continue
       echo "pruning $old (older than $KEEP_DAYS days)"
