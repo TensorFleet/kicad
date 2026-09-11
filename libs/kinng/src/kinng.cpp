@@ -219,6 +219,22 @@ bool KINNG_PUBLISHER::Start()
         return false;
     }
 
+    // pub0 queues outgoing messages per subscriber and drops when that queue is full.  The nng
+    // default is 16 messages, which a burst of events (one job's progress reports, the document
+    // events of a few quick commits) overruns before a subscriber's event loop gets to read, and
+    // the subscriber then sees a sequence gap and has to re-read state.  Deepen the queue; the
+    // memory is only used while a subscriber lags.
+    retCode = nng_socket_set_int( m_socket->socket, NNG_OPT_SENDBUF, PUBLISHER_SEND_QUEUE_DEPTH );
+
+    if( retCode != 0 )
+    {
+        wxLogTrace( TraceNng, wxString::Format( wxS( "Got error code %d from nng_socket_set_int (NNG_OPT_SENDBUF)!" ),
+                                                retCode ) );
+        nng_close( m_socket->socket );
+        m_socket->socket = NNG_SOCKET_INITIALIZER;
+        return false;
+    }
+
     retCode = nng_listen( m_socket->socket, m_socketUrl.c_str(), nullptr, 0 );
 
     if( retCode != 0 )

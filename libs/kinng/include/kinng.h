@@ -99,6 +99,12 @@ public:
      */
     bool Publish( const std::string& aMessage );
 
+    /**
+     * Messages queued per subscriber before pub0 starts dropping (nng's NNG_OPT_SENDBUF; the nng
+     * default is 16, the maximum 8192).
+     */
+    static constexpr int PUBLISHER_SEND_QUEUE_DEPTH = 4096;
+
     const std::string& SocketPath() const { return m_socketUrl; }
 
 private:
