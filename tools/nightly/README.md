@@ -11,18 +11,18 @@ repository:
 | `nightly-<YYYYMMDD>-<sha10>` | one prerelease per build; pin to it. Kept for at least 90 days (`KEEP_DAYS`), see the contract below |
 | `nightly` | rolling prerelease: the latest build of every platform under stable asset names |
 
-The schedule fires from the default branch (`master`) and builds `web-api`, the branch
-fab_pcb pins. Every job checks out two things: the sources to build at the workspace root,
-and `tools/nightly` of the commit the workflow file came from in `nightly-tools/`, and only
-ever runs the scripts from the latter. So the workflow file has to be on `master`, but the
-ref being built can be anything, including a commit from before this pipeline existed. A
-build is skipped when the rolling release already carries that branch's head for every
-platform, so an idle branch costs one short job a night. `workflow_dispatch` takes a `ref`,
+The schedule fires from the default branch and builds `main`, the branch that carries the
+API patch series fab_pcb pins. Every job checks out two things: the sources to build at the
+workspace root, and `tools/nightly` of the commit the workflow file came from in
+`nightly-tools/`, and only ever runs the scripts from the latter. So the workflow file has
+to be on the default branch, but the ref being built can be anything, including a commit
+from before this pipeline existed. A build is skipped when the rolling release already
+carries `main`'s head for every platform, so an idle branch costs one short job a night. `workflow_dispatch` takes a `ref`,
 a `force` flag and a `platforms` subset:
 
 ```bash
 # publish a Linux build for a commit a consumer has pinned (any commit on any branch)
-gh workflow run nightly.yml --repo TensorFleet/kicad --ref master \
+gh workflow run nightly.yml --repo TensorFleet/kicad --ref main \
   -f ref=<commit> -f force=true -f platforms=linux-x86_64
 ```
 

@@ -6,7 +6,7 @@
 #   nightly                      rolling prerelease that always carries the latest assets
 #                                under stable names, plus manifest.json for consumers
 #
-# Two checkouts per job: the *sources* to build (web-api by default, or the `ref` input,
+# Two checkouts per job: the *sources* to build (main by default, or the `ref` input,
 # which may be a commit from before this pipeline existed) at the workspace root, and the
 # *tooling* (tools/nightly of the commit this workflow file comes from) in nightly-tools/.
 # Everything platform-specific lives in tools/nightly/ so it can be run by hand; this file
@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Git ref to build (default: web-api, the branch fab_pcb pins); any commit works, even one older than tools/nightly"
+        description: "Git ref to build (default: main); any commit works, even one older than tools/nightly"
         type: string
         default: ""
       force:
@@ -45,9 +45,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The schedule fires from the default branch (master, an upstream mirror kept level with
-  # web-api), but what fab_pcb and fabdesk pin is the API branch, so that is what gets built.
-  NIGHTLY_REF: web-api
+  # The branch the schedule builds.  main carries the API patch series that fab_pcb and
+  # fabdesk pin; the workflow file itself is read from the default branch.
+  NIGHTLY_REF: main
   # Where the second checkout puts tools/nightly; scripts are run from here, never from the
   # source checkout, so a commit that predates the pipeline can still be built.
   NIGHTLY_TOOLS: ${{ github.workspace }}/nightly-tools/tools/nightly
