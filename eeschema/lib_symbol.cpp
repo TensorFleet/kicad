@@ -40,6 +40,7 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <wx/tokenzr.h>
 #include <advanced_config.h>
 #include <properties/property.h>
 #include <properties/property_mgr.h>

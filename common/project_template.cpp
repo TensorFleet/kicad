@@ -31,7 +31,7 @@
 #include <kiplatform/io.h>
 #include <wildcards_and_files_ext.h>
 #include <wx_filename.h>
-#include "project_template.h"
+#include <project_template.h>
 
 
 #define SEP wxFileName::GetPathSeparator()

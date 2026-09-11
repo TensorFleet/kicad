@@ -274,6 +274,10 @@ private:
 };
 
 
+namespace
+{
+// Internal linkage: pcbnew and eeschema each define a class of this name,
+// and both end up in the same image in the headless build.
 class LOCK_CONTEXT_MENU : public CONDITIONAL_MENU
 {
 public:
@@ -293,6 +297,8 @@ public:
         return new LOCK_CONTEXT_MENU( this->m_tool );
     }
 };
+} // anonymous namespace
+
 
 
 SCH_EDIT_TOOL::SCH_EDIT_TOOL() :

@@ -446,6 +446,10 @@ private:
 };
 
 
+namespace
+{
+// Internal linkage: pcbnew and eeschema each define a class of this name,
+// and both end up in the same image in the headless build.
 class RECTANGLE_POINT_EDIT_BEHAVIOR : public POINT_EDIT_BEHAVIOR
 {
 public:
@@ -772,8 +776,14 @@ private:
     SCH_SHAPE&      m_rect;
     EDA_DRAW_FRAME& m_frame;
 };
+} // anonymous namespace
 
 
+
+namespace
+{
+// Internal linkage: pcbnew and eeschema each define a class of this name,
+// and both end up in the same image in the headless build.
 class TEXTBOX_POINT_EDIT_BEHAVIOR : public POINT_EDIT_BEHAVIOR
 {
 public:
@@ -811,6 +821,8 @@ public:
 private:
     SCH_TEXTBOX& m_textbox;
 };
+} // anonymous namespace
+
 
 
 class SHEET_POINT_EDIT_BEHAVIOR : public POINT_EDIT_BEHAVIOR

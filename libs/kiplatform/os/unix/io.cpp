@@ -40,6 +40,9 @@ FILE* KIPLATFORM::IO::SeqFOpen( const wxString& aPath, const wxString& aMode )
 {
     FILE* fp = wxFopen( aPath, aMode );
 
+    // macOS has no posix_fadvise (the headless backend reuses this file); the hint is
+    // only an optimisation, so skip it where the platform does not provide it.
+#ifdef POSIX_FADV_SEQUENTIAL
     if( fp )
     {
         if( posix_fadvise( fileno( fp ), 0, 0, POSIX_FADV_SEQUENTIAL ) != 0 )
@@ -48,6 +51,7 @@ FILE* KIPLATFORM::IO::SeqFOpen( const wxString& aPath, const wxString& aMode )
             fp = nullptr;
         }
     }
+#endif
 
     return fp;
 }

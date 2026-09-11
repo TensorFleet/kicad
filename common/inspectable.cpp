@@ -22,7 +22,9 @@
 
 #include <inspectable_impl.h>
 
+#ifndef KICAD_HEADLESS_API
 #include <wx/propgrid/property.h>
+#endif
 
 
 bool INSPECTABLE::Set( PROPERTY_BASE* aProperty, wxAny& aValue, bool aNotify )

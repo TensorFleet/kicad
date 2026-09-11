@@ -652,7 +652,7 @@ std::string g_previewBoard =
         "  )\n"
         ")\n";
 
-std::set<int> g_excludedLayers =
+static std::set<int> g_excludedLayers =
         {
             LAYER_VIAS,
             LAYER_VIA_THROUGH,

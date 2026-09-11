@@ -1,0 +1,46 @@
+wxWidgets 3.2.11: fix SIZEOF_VOID_P detection when cross-compiling to wasm32.
+
+Under emcmake, CMAKE_SIZEOF_VOID_P is left at the host value (8 on an arm64
+Mac) by the time build/cmake/setup.cmake configures setup.h, even though the
+per-language ABI probes (CMAKE_C/CXX_SIZEOF_DATA_PTR) correctly report 4 for
+wasm32-emscripten.  That makes setup.h declare SIZEOF_VOID_P 8 with
+SIZEOF_LONG 4 and SIZEOF_SIZE_T 4, and include/wx/types.h then fails with
+
+    error: "Pointers can't be stored inside integer types."
+
+Derive the value from the ABI probe instead.
+
+Apply with:  patch -p1 -d <wx source dir> < this file
+
+--- a/build/cmake/setup.h.in
++++ b/build/cmake/setup.h.in
+@@ -1049,7 +1049,7 @@
+ @SIZEOF_INT_CODE@
+ 
+ /* The number of bytes in a pointer.  */
+-#define SIZEOF_VOID_P @CMAKE_SIZEOF_VOID_P@
++#define SIZEOF_VOID_P @wxSIZEOF_VOID_P@
+ 
+ /* The number of bytes in a long.  */
+ @SIZEOF_LONG_CODE@
+--- a/build/cmake/setup.cmake
++++ b/build/cmake/setup.cmake
+@@ -701,6 +701,18 @@
+ endforeach()
+ 
+ check_type_size("long long" SIZEOF_LONG_LONG)
++
++# wasm/emscripten: CMAKE_SIZEOF_VOID_P is unreliable here (it can be left at
++# the host's 8 by the platform file), so derive the pointer size from the
++# per-language ABI probe, which is always correct.
++if(CMAKE_CXX_SIZEOF_DATA_PTR)
++    set(wxSIZEOF_VOID_P ${CMAKE_CXX_SIZEOF_DATA_PTR})
++elseif(CMAKE_C_SIZEOF_DATA_PTR)
++    set(wxSIZEOF_VOID_P ${CMAKE_C_SIZEOF_DATA_PTR})
++else()
++    set(wxSIZEOF_VOID_P ${CMAKE_SIZEOF_VOID_P})
++endif()
++message(STATUS "wxSIZEOF_VOID_P = ${wxSIZEOF_VOID_P}")
+ check_type_size(ssize_t SSIZE_T)
+ 
+ test_big_endian(WORDS_BIGENDIAN)

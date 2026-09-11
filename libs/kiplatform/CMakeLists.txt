@@ -1,7 +1,15 @@
 set( PLATFORM_COMPILE_DEFS "" )
 
 # Add port-specific files and definitions
-if( KICAD_WX_PORT STREQUAL osx )
+if( KICAD_HEADLESS_API )
+    # No toolkit: every port entry point is a no-op.  This is selected ahead of the
+    # real ports so the native macOS gate exercises the same code the wasm build gets.
+    set( PLATFORM_SRCS
+        port/none/touchpad.cpp
+        port/none/ui.cpp
+        port/none/webview.cpp
+        )
+elseif( KICAD_WX_PORT STREQUAL osx )
     set( PLATFORM_SRCS
         port/wxosx/touchpad.mm
         port/wxosx/ui.mm
@@ -40,7 +48,19 @@ endif()
 
 
 # Add OS-specific files and definitions
-if( APPLE )
+if( KICAD_HEADLESS_API )
+    # No desktop session, no keyring, no GIO/GTK.  io.cpp is the plain POSIX
+    # implementation, which is exactly what the headless core wants.
+    list( APPEND PLATFORM_SRCS
+        os/headless/app.cpp
+        os/headless/drivers.cpp
+        os/headless/environment.cpp
+        os/unix/io.cpp
+        os/headless/policy.cpp
+        os/headless/secrets.cpp
+        os/headless/printing.cpp
+        )
+elseif( APPLE )
     list( APPEND PLATFORM_SRCS
         os/apple/app.mm
         os/apple/drivers.mm

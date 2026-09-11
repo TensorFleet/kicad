@@ -107,7 +107,9 @@ class KICAD_API_SERVER;
 
 
 #define KIFACE_VERSION      1
+#ifndef KIFACE_GETTER
 #define KIFACE_GETTER       KIFACE_1
+#endif
 
 // The KIFACE acquisition function is declared extern "C" so its name should not
 // be mangled.
@@ -119,6 +121,11 @@ class KICAD_API_SERVER;
  #define LIB_ENV_VAR    wxT( "DYLD_LIBRARY_PATH" )
 #elif defined(_WIN32)
  #define LIB_ENV_VAR    wxT( "PATH" )
+#elif defined(__EMSCRIPTEN__)
+ // No dynamic loader: every KIFACE is registered statically (KIWAY::RegisterStaticKiface),
+ // and KIWAY::KiFACE()'s dlopen half is compiled out under KICAD_HEADLESS_API.  The name is
+ // still referenced by the diagnostics in that branch's error strings.
+ #define LIB_ENV_VAR    wxT( "LD_LIBRARY_PATH" )
 #else
  #error Platform support missing
 #endif
@@ -326,6 +333,15 @@ struct KIFACE
  * and a #NETLIST, (anything relating to production of a single #BOARD and added to class
  * #PROJECT.)
  */
+/**
+ * Point to the one and only KIFACE export.
+ *
+ * Declared ahead of KIWAY as well as below (an identical typedef may be repeated) so
+ * that RegisterStaticKiface() can name the type.
+ */
+typedef KIFACE* KIFACE_GETTER_FUNC( int* aKIFACEversion, int aKIWAYversion, PGM_BASE* aProgram );
+
+
 class KICOMMON_API KIWAY : public wxEvtHandler
 {
     friend struct PGM_SINGLE_TOP;        // can use set_kiface()
@@ -509,6 +525,20 @@ public:
     bool HasBlockingDialog() const { return m_blockingDialog != wxID_NONE; }
     void SetBlockingDialog( wxWindow* aWin );
 
+    /**
+     * Register a KIFACE that is linked into this image rather than loaded from a DSO.
+     *
+     * KiFACE() prefers a registered getter over dlopen'ing anything, and puts the
+     * result through the same OnKifaceStart() path.  Call this before the first
+     * KiFACE() for that face -- from the host's startup, not from a static
+     * initializer, since it needs PGM_BASE to exist by the time KiFACE() runs.
+     *
+     * @param aFaceType which KIFACE this getter provides
+     * @param aGetter the KIFACE_GETTER the face was compiled with (KifaceGetterPcb,
+     *                KifaceGetterSch, ...); nullptr un-registers it
+     */
+    static void RegisterStaticKiface( FACE_T aFaceType, KIFACE_GETTER_FUNC* aGetter );
+
 private:
     /// Get the [path &] name of the DSO holding the requested FACE_T.
     const wxString dso_search_path( FACE_T aFaceId );
@@ -530,8 +560,19 @@ private:
      */
     KIWAY_PLAYER* GetPlayerFrame( FRAME_T aFrameType );
 
+    /**
+     * Give a freshly obtained KIFACE its one chance at process-level initialization
+     * and cache it on success.  Shared by the DSO and the statically-linked paths.
+     *
+     * @return the KIFACE, or nullptr if OnKifaceStart() failed or threw
+     */
+    KIFACE* startKiface( FACE_T aFaceId, KIFACE* aKiface );
+
     static std::array<KIFACE*,KIWAY_FACE_COUNT>  m_kiface;
     static std::array<int,KIWAY_FACE_COUNT>      m_kiface_version;
+
+    /// Getters for KIFACEs linked into this image; see RegisterStaticKiface().
+    static std::array<KIFACE_GETTER_FUNC*,KIWAY_FACE_COUNT> m_staticGetters;
 
     int             m_ctl;
 

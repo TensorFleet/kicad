@@ -379,7 +379,7 @@ set( KICOMMON_SRCS
     startwizard/startwizard_provider_settings.cpp
     )
 
-if( UNIX AND NOT APPLE )
+if( UNIX_NOT_APPLE )
     list( APPEND KICOMMON_SRCS
         spacenav/libspnav_driver.cpp
     )
@@ -389,7 +389,166 @@ list( APPEND KICOMMON_SRCS
     navlib_safe_init.cpp
 )
 
-add_library( kicommon SHARED
+#
+# Headless split.
+#
+# KICOMMON_SRCS above stays the authoritative flat list so that new sources only ever
+# have to be added in one place.  The groups below name the subsets the headless API
+# core does *not* build, and are subtracted from it under KICAD_HEADLESS_API.
+#
+#  GUI  - needs a wxFrame/wxDialog/wxWindow, a bitmap store or a toolkit event loop
+#  NET  - libcurl, OAuth, the remote library providers and the out-of-process plugins
+#  VCS  - libgit2.  Subtracted under the option; common/headless/vcs_stub.cpp supplies
+#         the "no VCS, no local history" spellings of what the API path still calls
+#         (PROJECT::SaveToHistory, LOCAL_HISTORY, the ${VCS_*} text variables).
+#
+# NOTE: app_monitor.cpp is deliberately NOT here.  With KICAD_USE_SENTRY off it is a handful of
+# no-op breadcrumb functions over wxFileName, and KIWAY/TOOL_MANAGER/CONNECTION_GRAPH drop
+# breadcrumbs on the API path.
+set( KICOMMON_GUI_SRCS
+    background_jobs_monitor.cpp
+    bitmap.cpp
+    bitmap_info.cpp
+    bitmap_store.cpp
+    confirm.cpp
+    dialog_shim.cpp
+    # NOTE: dpi_scaling.cpp is not in this group.  It is three constants and a default scale
+    # factor of 1.0, which GAL_DISPLAY_OPTIONS -- built by EDA_TEXT's shape cache -- asks for.
+    eda_doc.cpp
+    grid_tricks.cpp
+    kidialog.cpp
+    launch_ext.cpp
+    navlib_safe_init.cpp
+    notifications_manager.cpp
+    scintilla_tricks.cpp
+    searchhelpfilefullpath.cpp
+    ui_events.cpp
+
+    kicad_gl/gl_utils.cpp
+    kicad_gl/gl_context_mgr.cpp
+
+    dialogs/eda_list_dialog.cpp
+    dialogs/eda_list_dialog_base.cpp
+    dialogs/dialog_fields_table_base.cpp
+    dialogs/dialog_rc_job.cpp
+    dialogs/dialog_rc_job_base.cpp
+    dialogs/dialog_restore_local_history.cpp
+    dialogs/dialog_HTML_reporter_base.cpp
+    dialogs/panel_startwizard_libraries_base.cpp
+    dialogs/panel_startwizard_privacy_base.cpp
+    dialogs/panel_startwizard_settings_base.cpp
+
+    widgets/aui_json_serializer.cpp
+    widgets/bitmap_button.cpp
+    widgets/grid_combobox.cpp
+    widgets/grid_icon_text_helpers.cpp
+    widgets/grid_text_button_helpers.cpp
+    widgets/grid_text_helpers.cpp
+    widgets/html_window.cpp
+    widgets/indicator_icon.cpp
+    widgets/kistatusbar.cpp
+    widgets/number_badge.cpp
+    widgets/std_bitmap_button.cpp
+    widgets/ui_common.cpp
+    widgets/up_down_tree.cpp
+    widgets/wx_collapsible_pane.cpp
+    widgets/wx_grid.cpp
+    widgets/wx_data_view_hyperlink_renderer.cpp
+    widgets/wx_html_report_panel.cpp
+    widgets/wx_html_report_panel_base.cpp
+    widgets/wx_html_report_box.cpp
+
+    startwizard/startwizard.cpp
+    startwizard/startwizard_provider_libraries.cpp
+    startwizard/startwizard_provider_privacy.cpp
+    startwizard/startwizard_provider_settings.cpp
+    )
+
+set( KICOMMON_NET_SRCS
+    kicad_curl/kicad_curl.cpp
+    kicad_curl/kicad_curl_easy.cpp
+
+    oauth/oauth_loopback_server.cpp
+    oauth/oauth_pkce.cpp
+    oauth/oauth_session.cpp
+    oauth/secure_token_store.cpp
+
+    remote_provider_client.cpp
+    remote_provider_metadata.cpp
+    remote_provider_models.cpp
+    remote_provider_utils.cpp
+    # NOTE: remote_provider_settings.cpp stays: it is a plain JSON settings struct that
+    # EESCHEMA_SETTINGS and PCBNEW_SETTINGS embed, with no network code in it.
+
+    # NOTE: api/api_plugin.cpp is not in this group.  API_HANDLER_COMMON validates the plugin
+    # identifier GetPluginSettingsPath is asked for, and the file is JSON parsing plus a regex.
+    api/api_plugin_manager.cpp
+    api/api_client.cpp
+    # NOTE: api/cross_probe_client.cpp is not in this group.  CrossProbeAnnounce is an API
+    # command, and the client only talks to the standard socket path.  It is the one nng user
+    # left on the headless path -- when nng goes, this answers unimplemented instead.
+    api/python_manager.cpp
+    )
+
+set( KICOMMON_VCS_SRCS
+    git/git_add_to_index_handler.cpp
+    git/git_branch_handler.cpp
+    git/git_clone_handler.cpp
+    git/git_commit_handler.cpp
+    git/git_config_handler.cpp
+    git/git_compare_handler.cpp
+    git/kigit_driver_registry.cpp
+    git/kigit_merge_blob_utils.cpp
+    git/git_init_handler.cpp
+    git/project_git_utils.cpp
+    git/git_pull_handler.cpp
+    git/git_push_handler.cpp
+    git/git_remove_from_index_handler.cpp
+    git/git_remove_vcs_handler.cpp
+    git/git_resolve_conflict_handler.cpp
+    git/git_revert_handler.cpp
+    git/git_status_handler.cpp
+    git/git_switch_branch_handler.cpp
+    git/git_sync_handler.cpp
+    git/kicad_git_common.cpp
+    git/kicad_git_errors.cpp
+    git/git_backend.cpp
+    git/kigit_orphan_registry.cpp
+    git/libgit_backend.cpp
+
+    local_history.cpp
+    history_lock.cpp
+    text_eval/text_eval_vcs.cpp
+    )
+
+if( KICAD_HEADLESS_API )
+    # Fail loudly if one of the names above stops matching KICOMMON_SRCS, rather than
+    # silently building a source the headless core is supposed to leave out.
+    foreach( _excluded ${KICOMMON_GUI_SRCS} ${KICOMMON_NET_SRCS} ${KICOMMON_VCS_SRCS} )
+        list( FIND KICOMMON_SRCS ${_excluded} _found )
+
+        if( _found EQUAL -1 )
+            message( FATAL_ERROR
+                     "KICAD_HEADLESS_API: ${_excluded} is no longer in KICOMMON_SRCS" )
+        endif()
+    endforeach()
+
+    list( REMOVE_ITEM KICOMMON_SRCS ${KICOMMON_GUI_SRCS} ${KICOMMON_NET_SRCS}
+                                    ${KICOMMON_VCS_SRCS} )
+
+    # There is no system font database to query, so the fontconfig wrapper is replaced by one
+    # that reads a manifest (or a plain folder of font files) out of KICAD_FONTS_DIR.  With no
+    # fonts mounted it misses every lookup, which is what OUTLINE_FONT::LoadFont() reads as
+    # "fall back to the stroke font".
+    list( REMOVE_ITEM KICOMMON_SRCS font/fontconfig.cpp )
+    list( APPEND KICOMMON_SRCS font/fontconfig_manifest.cpp )
+
+    # Headless spellings of the few free functions the API path calls that happen to live in
+    # confirm.cpp and widgets/ui_common.cpp.
+    list( APPEND KICOMMON_SRCS headless/headless_gui.cpp headless/vcs_stub.cpp )
+endif()
+
+add_library( kicommon ${KICAD_LIB_TYPE}
     ${KICOMMON_SRCS}
     )
 
@@ -412,21 +571,44 @@ endif()
 
 set_target_properties(kicommon PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
-target_link_libraries( kicommon
+# Built up in pieces rather than as one list so that the entries the headless core
+# drops (libcurl, glad, the space mouse) can be left out without disturbing the
+# order of the rest -- link order decides include order, and the default build's
+# compile lines must not change.
+set( KICOMMON_LIBS
     core
     kiapi
     kimath
-    kinng
+    )
+
+# nng is the socket transport; the headless API core serves in process only.
+if( NOT KICAD_HEADLESS_API )
+    list( APPEND KICOMMON_LIBS kinng )
+endif()
+
+list( APPEND KICOMMON_LIBS
     kiplatform
     nlohmann_json
     nlohmann_json_schema_validator
     FastFloat::fast_float
     fmt::fmt
-    CURL::libcurl
+    )
+
+if( NOT KICAD_HEADLESS_API )
+    list( APPEND KICOMMON_LIBS CURL::libcurl )
+endif()
+
+list( APPEND KICOMMON_LIBS
     picosha2
     rapidcsv
     sexpr
-    glad
+    )
+
+if( NOT KICAD_HEADLESS_API )
+    list( APPEND KICOMMON_LIBS glad )
+endif()
+
+list( APPEND KICOMMON_LIBS
     thread-pool
     ${ZSTD_LIBRARY}
     ${wxWidgets_LIBRARIES}
@@ -441,6 +623,8 @@ target_link_libraries( kicommon
    	${HarfBuzz_LIBRARIES}
 	${Fontconfig_LIBRARIES}
     )
+
+target_link_libraries( kicommon ${KICOMMON_LIBS} )
 
 
 if( KICAD_USE_SENTRY )
@@ -929,7 +1113,7 @@ set( COMMON_SRCS
     )
 
 # This needs to be in the common library until draw_panel_gal is moved to kicommon
-if( UNIX AND NOT APPLE )
+if( UNIX_NOT_APPLE )
     list( APPEND COMMON_SRCS
         spacenav/spnav_2d_plugin.cpp
     )
@@ -941,7 +1125,108 @@ list( APPEND COMMON_SRCS
     api/api_undo_stack.cpp
     api/api_handler_library.cpp
     api/api_jobs.cpp
+    api/api_server_host.cpp
+    project_template.cpp
 )
+
+#
+# Headless split for `common`.
+#
+# COMMON_GUI_SRCS names everything in COMMON_SRCS that needs a wxFrame/wxDialog, a
+# wxGLCanvas, an interactive tool, a property grid or a database/HTTP connection.
+# What is left is the document model, the plotters, the file IO, the drawing sheet,
+# the tool framework core and the API handlers.
+#
+set( COMMON_GUI_SRCS
+    ${COMMON_ABOUT_DLG_SRCS}
+    ${COMMON_DLG_SRCS}
+    ${COMMON_WIDGET_SRCS}
+    ${COMMON_PREVIEW_ITEMS_SRCS}
+
+    board_printout.cpp
+    clipboard.cpp
+    draw_panel_gal.cpp
+    gal_display_options_common.cpp
+    eda_base_frame.cpp
+    eda_draw_frame.cpp
+    file_history.cpp
+    hotkey_store.cpp
+    hotkeys_basic.cpp
+    kiway_player.cpp
+    lib_table_grid_tricks.cpp
+    lib_table_notebook_panel.cpp
+    lib_tree_model.cpp
+    lib_tree_model_adapter.cpp
+    design_block_tree_model_adapter.cpp
+    printout.cpp
+    status_popup.cpp
+    textentry_tricks.cpp
+    validators.cpp
+    view/wx_view_controls.cpp
+
+    diff_merge/diff_renderer_gal.cpp
+
+    tool/action_menu.cpp
+    tool/action_toolbar.cpp
+    tool/common_control.cpp
+    tool/common_tools.cpp
+    tool/conditional_menu.cpp
+    tool/construction_manager.cpp
+    tool/design_block_control.cpp
+    tool/edit_relations.cpp
+    tool/editor_conditions.cpp
+    tool/embed_tool.cpp
+    tool/grid_menu.cpp
+    tool/group_tool.cpp
+    tool/library_editor_control.cpp
+    tool/picker_tool.cpp
+    tool/properties_tool.cpp
+    tool/selection_tool.cpp
+    tool/tool_dispatcher.cpp
+    tool/tool_menu.cpp
+    tool/zoom_menu.cpp
+    tool/zoom_tool.cpp
+
+    properties/pg_cell_renderer.cpp
+    properties/pg_editors.cpp
+    properties/pg_properties.cpp
+
+    database/database_connection.cpp
+
+    http_lib/http_lib_connection.cpp
+    http_lib/http_lib_settings.cpp
+    )
+
+if( KICAD_HEADLESS_API )
+    foreach( _excluded ${COMMON_GUI_SRCS} )
+        list( FIND COMMON_SRCS ${_excluded} _found )
+
+        if( _found EQUAL -1 )
+            message( FATAL_ERROR
+                     "KICAD_HEADLESS_API: ${_excluded} is no longer in COMMON_SRCS" )
+        endif()
+    endforeach()
+
+    list( REMOVE_ITEM COMMON_SRCS ${COMMON_GUI_SRCS} )
+
+    # Sources that belong to a GUI group as a whole but carry no GUI of their own and are
+    # reached from the API path, so they go back in.  Keep the reason with each one.
+    set( COMMON_HEADLESS_KEEP
+        # The fields tables' shared data model.  It is the BOM's data source as much as it is
+        # a grid table -- both eeschema's and pcbnew's `bom` jobs build one and call Export()
+        # on it -- and under KICAD_HEADLESS_API it sits on HEADLESS_GRID_TABLE_BASE instead of
+        # wxGridTableBase, with the cell attribute/renderer half compiled out.
+        dialogs/fields_table_data_model.cpp
+        )
+
+    list( APPEND COMMON_SRCS ${COMMON_HEADLESS_KEEP} )
+
+    # PNG_PLOTTER rasterizes through Cairo, which is not in the wasm dependency set.  The
+    # stub keeps the class (PLOT_FORMAT::PNG is an enumerator the plot paths construct a
+    # plotter for) but reports that PNG output is not available and fails cleanly.
+    list( REMOVE_ITEM COMMON_SRCS plotters/PNG_plotter.cpp )
+    list( APPEND COMMON_SRCS plotters/PNG_plotter_stub.cpp )
+endif()
 
 add_library( common STATIC
     ${COMMON_SRCS}
@@ -974,10 +1259,26 @@ if( TARGET remote_provider_schema_build_copy )
 endif()
 add_dependencies( common compoundfilereader )  # used by altium_parser.cpp
 
-target_link_libraries( common
-    libcontext
+# libcontext is hand-written assembly for the coroutine switcher, which the headless
+# build replaces with a run-to-completion stub; nanodbc/Boost::locale are only pulled
+# in by database_connection.cpp, which the headless build drops.  As with kicommon,
+# the list is assembled in order so the default build's link (and hence include)
+# order is unchanged.
+set( COMMON_LIBS )
+
+if( NOT KICAD_HEADLESS_API )
+    list( APPEND COMMON_LIBS libcontext )
+endif()
+
+list( APPEND COMMON_LIBS
     kimath
-    kinng
+    )
+
+if( NOT KICAD_HEADLESS_API )
+    list( APPEND COMMON_LIBS kinng )
+endif()
+
+list( APPEND COMMON_LIBS
     kiplatform
     snap
     kicommon
@@ -990,9 +1291,17 @@ target_link_libraries( common
     nlohmann_json
     compoundfilereader
     Boost::headers
+    )
+
+if( NOT KICAD_HEADLESS_API )
     # Database support needs these two
-    nanodbc # for now; maybe hoist out of common
-    Boost::locale
+    list( APPEND COMMON_LIBS
+        nanodbc # for now; maybe hoist out of common
+        Boost::locale
+        )
+endif()
+
+list( APPEND COMMON_LIBS
     ${wxWidgets_LIBRARIES}
     ${EXTRA_LIBS}
     # outline font support
@@ -1000,6 +1309,8 @@ target_link_libraries( common
    	${HarfBuzz_LIBRARIES}
 	${Fontconfig_LIBRARIES}
     )
+
+target_link_libraries( common ${COMMON_LIBS} )
 
 if( KICAD_USE_SENTRY )
     target_link_libraries( common
@@ -1017,16 +1328,20 @@ target_include_directories( common
 # text markup support
 add_dependencies( common pegtl )
 
-target_compile_definitions( nanodbc PUBLIC NANODBC_THROW_NO_SOURCE_LOCATION )
+if( TARGET nanodbc )
+    target_compile_definitions( nanodbc PUBLIC NANODBC_THROW_NO_SOURCE_LOCATION )
+endif()
 
 target_include_directories( common PUBLIC
     $<TARGET_PROPERTY:pegtl,INTERFACE_INCLUDE_DIRECTORIES>
     $<TARGET_PROPERTY:magic_enum,INTERFACE_INCLUDE_DIRECTORIES>
     )
 
-target_include_directories( common SYSTEM PUBLIC
-    $<TARGET_PROPERTY:nanodbc,INTERFACE_INCLUDE_DIRECTORIES>
-    )
+if( TARGET nanodbc )
+    target_include_directories( common SYSTEM PUBLIC
+        $<TARGET_PROPERTY:nanodbc,INTERFACE_INCLUDE_DIRECTORIES>
+        )
+endif()
 
 set( PCB_COMMON_SRCS
     hash_eda.cpp
@@ -1148,6 +1463,30 @@ set( PCB_COMMON_SRCS
     ${CMAKE_SOURCE_DIR}/pcbnew/api/api_pcb_utils.cpp
 )
 
+# GUI members of pcbcommon: the board frame, the GAL draw panel and the pickers.
+set( PCB_COMMON_GUI_SRCS
+    ${CMAKE_SOURCE_DIR}/pcbnew/pcb_base_frame.cpp
+    ${CMAKE_SOURCE_DIR}/pcbnew/pcb_draw_panel_gal.cpp
+    ${CMAKE_SOURCE_DIR}/pcbnew/sel_layer.cpp
+    ${CMAKE_SOURCE_DIR}/pcbnew/tools/pcb_viewer_tools.cpp
+    widgets/net_selector.cpp
+    widgets/netclass_selector.cpp
+    widgets/area_selector.cpp
+    )
+
+if( KICAD_HEADLESS_API )
+    foreach( _excluded ${PCB_COMMON_GUI_SRCS} )
+        list( FIND PCB_COMMON_SRCS ${_excluded} _found )
+
+        if( _found EQUAL -1 )
+            message( FATAL_ERROR
+                     "KICAD_HEADLESS_API: ${_excluded} is no longer in PCB_COMMON_SRCS" )
+        endif()
+    endforeach()
+
+    list( REMOVE_ITEM PCB_COMMON_SRCS ${PCB_COMMON_GUI_SRCS} )
+endif()
+
 add_library( pcbcommon STATIC ${PCB_COMMON_SRCS} )
 
 if( KICAD_USE_PCH )
@@ -1180,7 +1519,7 @@ target_link_libraries( pcbcommon PUBLIC
     zint
 )
 
-if( APPLE OR NOT UNIX )
+if( ( APPLE OR NOT UNIX ) AND NOT KICAD_HEADLESS_API )
     # On Windows/MacOS, the SpaceMouse support is provided by the navlib subdirectory
     message( STATUS "Including 3Dconnexion SpaceMouse navigation support in pcbcommon" )
     add_subdirectory( ../pcbnew/navlib ./navlib)

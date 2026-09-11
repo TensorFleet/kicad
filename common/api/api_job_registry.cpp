@@ -165,15 +165,26 @@ RunJobResponse API_JOB_REGISTRY::Run( KICAD_API_SERVER* aServer, EXECUTOR aExecu
         return entry->Result;
     }
 
+    if( inlineMode() )
     {
+        // No worker to hand the job to.  Hold it until the host is between requests: the
+        // caller is told JS_RUNNING now, subscribes to JobProgress, and the job runs (and
+        // publishes) before its first GetJobStatus is answered.
         std::lock_guard<std::mutex> lock( m_mutex );
-        m_queue.push_back( entry );
-
-        if( !m_worker.joinable() )
-            m_worker = std::thread( [this]() { workerLoop(); } );
+        m_deferred.push_back( entry );
     }
+    else
+    {
+        {
+            std::lock_guard<std::mutex> lock( m_mutex );
+            m_queue.push_back( entry );
 
-    m_condition.notify_all();
+            if( !m_worker.joinable() )
+                m_worker = std::thread( [this]() { workerLoop(); } );
+        }
+
+        m_condition.notify_all();
+    }
 
     RunJobResponse response;
     response.set_status( JobStatus::JS_RUNNING );
@@ -321,6 +332,15 @@ void API_JOB_REGISTRY::WaitForIdle()
 {
     std::unique_lock<std::mutex> lock( m_mutex );
 
+    if( m_inlineMode )
+    {
+        // There is no worker to wake us, so waiting would deadlock; run what is held
+        // instead, which is what "wait for the jobs to finish" means here.
+        lock.unlock();
+        RunDeferred();
+        return;
+    }
+
     m_condition.wait( lock,
                       [&]()
                       {
@@ -329,10 +349,58 @@ void API_JOB_REGISTRY::WaitForIdle()
 }
 
 
+void API_JOB_REGISTRY::SetInlineMode( bool aInline )
+{
+    std::lock_guard<std::mutex> lock( m_mutex );
+    m_inlineMode = aInline;
+}
+
+
+bool API_JOB_REGISTRY::InlineMode() const
+{
+    std::lock_guard<std::mutex> lock( m_mutex );
+    return m_inlineMode;
+}
+
+
+bool API_JOB_REGISTRY::inlineMode() const
+{
+    std::lock_guard<std::mutex> lock( m_mutex );
+    return m_inlineMode;
+}
+
+
+void API_JOB_REGISTRY::RunDeferred()
+{
+    for( ;; )
+    {
+        std::shared_ptr<ENTRY> entry;
+
+        {
+            std::lock_guard<std::mutex> lock( m_mutex );
+
+            if( !m_inlineMode || m_runningDeferred || m_deferred.empty() )
+                return;
+
+            entry = m_deferred.front();
+            m_deferred.pop_front();
+            m_runningDeferred = true;
+        }
+
+        execute( entry );
+
+        {
+            std::lock_guard<std::mutex> lock( m_mutex );
+            m_runningDeferred = false;
+        }
+    }
+}
+
+
 bool API_JOB_REGISTRY::Busy() const
 {
     std::lock_guard<std::mutex> lock( m_mutex );
-    return !m_queue.empty() || m_running != nullptr;
+    return !m_queue.empty() || !m_deferred.empty() || m_running != nullptr;
 }
 
 
@@ -342,6 +410,12 @@ std::optional<std::string> API_JOB_REGISTRY::ExclusiveJob() const
 
     if( m_running && m_running->Exclusive )
         return m_running->Id;
+
+    for( const std::shared_ptr<ENTRY>& entry : m_deferred )
+    {
+        if( entry->Exclusive )
+            return entry->Id;
+    }
 
     for( const std::shared_ptr<ENTRY>& entry : m_queue )
     {

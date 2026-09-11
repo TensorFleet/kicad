@@ -1113,7 +1113,7 @@ bool PCB_SELECTION_TOOL::selectCursor( bool aForceSelect, CLIENT_SELECTION_FILTE
 
 
 // Some navigation actions are allowed in selectMultiple
-const TOOL_ACTION* allowedActions[] = { &ACTIONS::panUp,          &ACTIONS::panDown,
+static const TOOL_ACTION* allowedActions[] = { &ACTIONS::panUp,          &ACTIONS::panDown,
                                         &ACTIONS::panLeft,        &ACTIONS::panRight,
                                         &ACTIONS::cursorUp,       &ACTIONS::cursorDown,
                                         &ACTIONS::cursorLeft,     &ACTIONS::cursorRight,

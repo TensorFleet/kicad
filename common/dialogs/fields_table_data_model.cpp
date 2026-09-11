@@ -26,12 +26,16 @@
 #include <template_fieldnames.h>
 
 #include <nlohmann/json.hpp>
-#include <widgets/grid_striped_renderer.h>
 #include <widgets/ui_common.h>
+
+#ifndef KICAD_HEADLESS_API
+#include <widgets/grid_striped_renderer.h>
 #include <wx/dc.h>
 #include <wx/settings.h>
+#endif
 
 
+#ifndef KICAD_HEADLESS_API
 GRID_CELL_RESOLVED_TEXT_RENDERER::GRID_CELL_RESOLVED_TEXT_RENDERER() :
         wxGridCellStringRenderer()
 {
@@ -71,6 +75,7 @@ wxGridCellRenderer* GRID_CELL_RESOLVED_TEXT_RENDERER::Clone() const
 {
     return new GRID_CELL_RESOLVED_TEXT_RENDERER();
 }
+#endif  // KICAD_HEADLESS_API
 
 
 const wxString FIELDS_TABLE_DATA_MODEL_BASE::QUANTITY_VARIABLE = wxS( "${QUANTITY}" );
@@ -78,8 +83,10 @@ const wxString FIELDS_TABLE_DATA_MODEL_BASE::ITEM_NUMBER_VARIABLE = wxS( "${ITEM
 
 
 FIELDS_TABLE_DATA_MODEL_BASE::FIELDS_TABLE_DATA_MODEL_BASE() :
+#ifndef KICAD_HEADLESS_API
         m_stripedRenderer( nullptr ),
         m_resolvedTextRenderer( nullptr ),
+#endif
         m_edited( false ),
         m_sortColumn( 0 ),
         m_sortAscending( false ),
@@ -94,11 +101,14 @@ FIELDS_TABLE_DATA_MODEL_BASE::FIELDS_TABLE_DATA_MODEL_BASE() :
 
 FIELDS_TABLE_DATA_MODEL_BASE::~FIELDS_TABLE_DATA_MODEL_BASE()
 {
+#ifndef KICAD_HEADLESS_API
     wxSafeDecRef( m_stripedRenderer );
     wxSafeDecRef( m_resolvedTextRenderer );
+#endif
 }
 
 
+#ifndef KICAD_HEADLESS_API
 bool FIELDS_TABLE_DATA_MODEL_BASE::cellUsesResolvedTextRenderer( int aRow, int aCol )
 {
     wxCHECK( aRow >= 0 && aRow < GetNumberRows(), false );
@@ -215,12 +225,15 @@ wxGridCellAttr* FIELDS_TABLE_DATA_MODEL_BASE::applyCellDecorations( wxGridCellAt
 
     return hintedAttr;
 }
+#endif  // KICAD_HEADLESS_API
 
 
 void FIELDS_TABLE_DATA_MODEL_BASE::commitPendingGridChanges()
 {
+#ifndef KICAD_HEADLESS_API
     if( wxGrid* grid = GetView() )
         static_cast<WX_GRID*>( grid )->CommitPendingChanges( true );
+#endif
 }
 
 
@@ -275,6 +288,7 @@ void FIELDS_TABLE_DATA_MODEL_BASE::RemoveColumn( int aCol )
     else if( m_sortColumn > aCol )
         m_sortColumn--;
 
+#ifndef KICAD_HEADLESS_API
     if( auto attrIt = m_colAttrs.find( aCol ); attrIt != m_colAttrs.end() )
     {
         wxSafeDecRef( attrIt->second );
@@ -293,6 +307,7 @@ void FIELDS_TABLE_DATA_MODEL_BASE::RemoveColumn( int aCol )
         wxGridTableMessage msg( this, wxGRIDTABLE_NOTIFY_COLS_DELETED, aCol, 1 );
         grid->ProcessTableMessage( msg );
     }
+#endif
 
     m_edited = true;
 }
@@ -344,12 +359,17 @@ wxString FIELDS_TABLE_DATA_MODEL_BASE::GetColFieldName( int aCol )
 
 int FIELDS_TABLE_DATA_MODEL_BASE::GetColDataWidth( int aCol )
 {
+#ifdef KICAD_HEADLESS_API
+    // Column widths are a property of the grid, and there is no grid here.
+    return 0;
+#else
     int width = KIUI::GetTextSize( GetColLabelValue( aCol ), GetView() ).x;
 
     for( int row = 0; row < GetNumberRows(); ++row )
         width = std::max( width, KIUI::GetTextSize( GetResolvedValue( row, aCol ), GetView() ).x );
 
     return width;
+#endif
 }
 
 
@@ -819,6 +839,8 @@ void FIELDS_TABLE_DATA_MODEL_BASE::RestoreUndoState( const wxString& aState )
     m_edited = true;
     RebuildRows();
 
+#ifndef KICAD_HEADLESS_API
     if( GetView() )
         GetView()->ForceRefresh();
+#endif
 }

@@ -105,8 +105,12 @@
 #include <pcb_edit_frame.h>
 #include <pcb_track.h>
 #include <pgm_base.h>
+// The 3D renderer is an OpenGL/raytracing path in 3d-viewer, which the headless
+// build does not compile.  JobExportRender reports "unsupported" instead.
+#ifndef KICAD_HEADLESS_API
 #include <3d_rendering/raytracing/render_3d_raytrace_ram.h>
 #include <3d_rendering/track_ball.h>
+#endif
 #include <project_pcb.h>
 #include <pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.h>
 #include <pcb_io/common/plugin_common_layer_mapping.h>
@@ -119,6 +123,8 @@
 #include <settings/settings_manager.h>
 #include <dialogs/dialog_gendrill.h>
 #include <dialogs/dialog_gen_footprint_position.h>
+#include <exporters/export_ipc2581.h>
+#include <exporters/export_odbpp.h>
 #include <dialogs/dialog_export_2581.h>
 #include <dialogs/dialog_export_odbpp.h>
 #include <dialogs/dialog_export_step.h>
@@ -1009,6 +1015,13 @@ int PCBNEW_JOBS_HANDLER::JobExportBom( JOB* aJob )
 
 int PCBNEW_JOBS_HANDLER::JobExportStep( JOB* aJob )
 {
+#ifdef KICAD_HEADLESS_API
+    // Both halves of this job are out of reach here: STEP/BREP/GLB go through OpenCascade and
+    // VRML through the 3D cache and its scene graph, none of which this build links.
+    m_reporter->Report( _( "3D model export is not available in this build" ) + wxS( "\n" ),
+                        RPT_SEVERITY_ERROR );
+    return CLI::EXIT_CODES::ERR_UNKNOWN;
+#else
     JOB_EXPORT_PCB_3D* aStepJob = dynamic_cast<JOB_EXPORT_PCB_3D*>( aJob );
 
     if( aStepJob == nullptr )
@@ -1122,11 +1135,17 @@ int PCBNEW_JOBS_HANDLER::JobExportStep( JOB* aJob )
     }
 
     return CLI::EXIT_CODES::OK;
+#endif
 }
 
 
 int PCBNEW_JOBS_HANDLER::JobExportRender( JOB* aJob )
 {
+#ifdef KICAD_HEADLESS_API
+    m_reporter->Report( _( "3D rendering is not available in this build" ) + wxS( "\n" ),
+                        RPT_SEVERITY_ERROR );
+    return CLI::EXIT_CODES::ERR_UNKNOWN;
+#else
     JOB_PCB_RENDER* aRenderJob = dynamic_cast<JOB_PCB_RENDER*>( aJob );
 
     if( aRenderJob == nullptr )
@@ -1401,6 +1420,7 @@ int PCBNEW_JOBS_HANDLER::JobExportRender( JOB* aJob )
         m_reporter->Report( _( "Error creating 3D render image" ) + wxS( "\n" ), RPT_SEVERITY_ERROR );
         return CLI::EXIT_CODES::ERR_UNKNOWN;
     }
+#endif
 }
 
 
@@ -3170,7 +3190,7 @@ int PCBNEW_JOBS_HANDLER::JobExportIpc2581( JOB* aJob )
         return CLI::EXIT_CODES::ERR_INVALID_OUTPUT_CONFLICT;
     }
 
-    if( !DIALOG_EXPORT_2581::GenerateFile( *job, brd, m_progressReporter, m_reporter ) )
+    if( !ExportBoardToIpc2581( *job, brd, m_progressReporter, m_reporter ) )
         return CLI::EXIT_CODES::ERR_UNKNOWN;
 
     return CLI::EXIT_CODES::SUCCESS;
@@ -3330,7 +3350,7 @@ int PCBNEW_JOBS_HANDLER::JobExportOdb( JOB* aJob )
         toolManager->GetTool<ZONE_FILLER_TOOL>()->FillAllZones( nullptr, m_progressReporter, true );
     }
 
-    DIALOG_EXPORT_ODBPP::GenerateODBPPFiles( *job, brd, nullptr, m_progressReporter, m_reporter );
+    ExportBoardToOdbpp( *job, brd, nullptr, m_progressReporter, m_reporter );
     aJob->AddOutput( outPath );
 
     if( m_reporter->HasMessageOfSeverity( RPT_SEVERITY_ERROR ) )

@@ -85,6 +85,36 @@ public:
     ///         job rewrites an open document, so no other command may touch it meanwhile.
     std::optional<std::string> ExclusiveJob() const;
 
+    /**
+     * Run asynchronous jobs on the caller's thread instead of a worker.
+     *
+     * For hosts that have no threads to give (the headless/wasm build).  An async Run()
+     * still registers the job and still answers JS_RUNNING with the job id, so the
+     * protocol is unchanged; the job is held until the host next calls RunDeferred(),
+     * which a request/response host does between requests.  The worker thread is never
+     * created.
+     *
+     * Deferring rather than running the job inside Run() is what lets a client subscribe
+     * to JobProgress after it has been told JS_RUNNING and still see the events, the way
+     * it does over a socket.
+     *
+     * Set this before the first Run().
+     */
+    void SetInlineMode( bool aInline );
+
+    /// @return true when asynchronous jobs are run on the caller's thread
+    bool InlineMode() const;
+
+    /**
+     * Run every job that inline mode is holding, on the calling thread.
+     *
+     * A host calls this when it is between requests -- after a reply has gone out and
+     * before the next one is dispatched -- so that the progress events land where a
+     * client can hear them.  Does nothing when inline mode is off, and does nothing
+     * re-entrantly (a job that dispatches is not re-entered).
+     */
+    void RunDeferred();
+
     ~API_JOB_REGISTRY();
 
 private:
@@ -109,6 +139,9 @@ private:
 
     void workerLoop();
 
+    /// Locked read of m_inlineMode, for use from Run()
+    bool inlineMode() const;
+
     mutable std::mutex                             m_mutex;
     std::condition_variable                        m_condition;
     std::map<std::string, std::shared_ptr<ENTRY>>  m_jobs;
@@ -116,6 +149,12 @@ private:
     std::shared_ptr<ENTRY>                         m_running;
     std::thread                                    m_worker;
     bool                                           m_stopWorker = false;
+    bool                                           m_inlineMode = false;
+
+    /// Inline mode only: jobs accepted but not yet run.  Counted as queued by Busy() and
+    /// ExclusiveJob(), so the AS_BUSY guards behave as they do with a worker.
+    std::deque<std::shared_ptr<ENTRY>>             m_deferred;
+    bool                                           m_runningDeferred = false;
 
     /// Finished jobs older than this many are forgotten
     static constexpr size_t MAX_REMEMBERED_JOBS = 64;

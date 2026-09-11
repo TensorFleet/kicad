@@ -558,6 +558,175 @@ set( EESCHEMA_SRCS
     tools/symbol_editor_pin_tool.cpp
     )
 
+#
+# Headless split.
+#
+# EESCHEMA_GUI_SRCS names everything in EESCHEMA_SRCS that needs a frame, a dialog,
+# a wxWidget or the ngspice simulator.  What is left is the schematic model, the
+# sch_io plugins, ERC, the netlist exporters, the plotters and the API handlers.
+#
+set( EESCHEMA_GUI_SRCS
+    ${EESCHEMA_DLGS}
+    ${EESCHEMA_LIBEDIT_SRCS}
+    ${EESCHEMA_SIM_SRCS}
+    ${EESCHEMA_WIDGETS}
+    ${SYNC_SHEET_PIN_SRCS}
+
+    import_gfx/dialog_import_gfx_sch_base.cpp
+    import_gfx/dialog_import_gfx_sch.cpp
+
+    diff_merge/sch_diff_canvas_context.cpp
+    diff_merge/sym_diff_canvas_context.cpp
+
+    bom_plugins.cpp
+    cross-probing.cpp
+    eeschema_config.cpp
+    fields_grid_table.cpp
+    files-io.cpp
+    generate_alias_info.cpp
+    lib_fields_data_model.cpp
+    menubar.cpp
+    net_navigator.cpp
+    picksymbol.cpp
+    project_rescue.cpp
+    sch_base_frame.cpp
+    sch_design_block_utils.cpp
+    sch_draw_panel.cpp
+    sch_edit_frame.cpp
+    sch_preview_panel.cpp
+    sch_validators.cpp
+    symbol_chooser_frame.cpp
+    symbol_fields_data_model.cpp
+    symbol_library_manager.cpp
+    symbol_tree_model_adapter.cpp
+    symbol_tree_synchronizing_adapter.cpp
+    symbol_viewer_frame.cpp
+    toolbars_sch_editor.cpp
+    toolbars_symbol_viewer.cpp
+
+    tools/assign_footprints.cpp
+    tools/backannotate.cpp
+    tools/sch_align_tool.cpp
+    tools/ee_graphic_tool.cpp
+    tools/ee_grid_helper.cpp
+    tools/rule_area_create_helper.cpp
+    tools/sch_drawing_tools.cpp
+    tools/sch_design_block_control.cpp
+    tools/sch_edit_table_tool.cpp
+    tools/sch_edit_tool.cpp
+    tools/sch_editor_control.cpp
+    tools/sch_editor_conditions.cpp
+    tools/sch_find_replace_tool.cpp
+    tools/sch_group_tool.cpp
+    tools/sch_inspection_tool.cpp
+    tools/sch_line_wire_bus_tool.cpp
+    tools/sch_drag_net_collision.cpp
+    tools/sch_move_tool.cpp
+    tools/sch_navigate_tool.cpp
+    tools/sch_point_editor.cpp
+    tools/sch_selection_tool.cpp
+    tools/symbol_editor_control.cpp
+    tools/symbol_editor_drawing_tools.cpp
+    tools/symbol_editor_edit_tool.cpp
+    tools/symbol_editor_move_tool.cpp
+    tools/symbol_editor_pin_tool.cpp
+    )
+
+if( KICAD_HEADLESS_API )
+    foreach( _excluded ${EESCHEMA_GUI_SRCS} )
+        list( FIND EESCHEMA_SRCS ${_excluded} _found )
+
+        if( _found EQUAL -1 )
+            message( FATAL_ERROR
+                     "KICAD_HEADLESS_API: ${_excluded} is no longer in EESCHEMA_SRCS" )
+        endif()
+    endforeach()
+
+    list( REMOVE_ITEM EESCHEMA_SRCS ${EESCHEMA_GUI_SRCS} )
+
+    # The OLE preview decoders need libwmf (WMF) and libemf2svg + nanosvgrast (EMF), and
+    # emf2svg links Fontconfig.  The stub answers "no preview" for all of them; the OrCAD
+    # reader itself is unaffected.
+    list( REMOVE_ITEM EESCHEMA_SRCS sch_io/ole_emf.cpp sch_io/ole_image.cpp )
+    list( APPEND EESCHEMA_SRCS sch_io/ole_image_stub.cpp )
+
+    # Sources that belong to a GUI group as a whole but carry no GUI of their own and are
+    # reached from the API path, so they go back in.  Keep the reason with each one.
+    set( EESCHEMA_HEADLESS_KEEP
+        # SCH::IFACE::OnKifaceStart registers SYMBOL_EDITOR_SETTINGS, and GetAppSettings
+        # serves it; the class is plain JSON parameters.
+        symbol_editor/symbol_editor_settings.cpp
+
+        # EESCHEMA_JOBS_HANDLER::JobExportBom builds a SYMBOL_FIELDS_EDITOR_GRID_DATA_MODEL
+        # and exports it; the grid half of the model is compiled out under the option.
+        symbol_fields_data_model.cpp
+
+        # The SIM_MODEL half of eeschema/sim: SCHEMATIC_SETTINGS embeds NGSPICE_SETTINGS,
+        # SCH_SYMBOL migrates simulation fields, and the spice netlist exporter is built on
+        # SIM_LIB_MGR and the model serializer.  None of it needs the simulator frame or
+        # libngspice; the dialogs, the plot tabs, the ngspice wrapper and the tuner stay out.
+        sim/sim_library.cpp
+        sim/sim_library_spice.cpp
+        sim/sim_library_ibis.cpp
+        sim/sim_lib_mgr.cpp
+        sim/sim_model_serializer.cpp
+        sim/sim_model.cpp
+        sim/sim_model_behavioral.cpp
+        sim/sim_model_ideal.cpp
+        sim/sim_model_l_mutual.cpp
+        sim/sim_model_ibis.cpp
+        sim/sim_model_ngspice.cpp
+        sim/sim_model_ngspice_data_bjt.cpp
+        sim/sim_model_ngspice_data_bsim1.cpp
+        sim/sim_model_ngspice_data_bsim2.cpp
+        sim/sim_model_ngspice_data_bsim3.cpp
+        sim/sim_model_ngspice_data_bsim4.cpp
+        sim/sim_model_ngspice_data_b3soi.cpp
+        sim/sim_model_ngspice_data_b4soi.cpp
+        sim/sim_model_ngspice_data_diode.cpp
+        sim/sim_model_ngspice_data_hfet.cpp
+        sim/sim_model_ngspice_data_hicum2.cpp
+        sim/sim_model_ngspice_data_hsim.cpp
+        sim/sim_model_ngspice_data_jfet.cpp
+        sim/sim_model_ngspice_data_mes.cpp
+        sim/sim_model_ngspice_data_mos.cpp
+        sim/sim_model_ngspice_data_mos6.cpp
+        sim/sim_model_ngspice_data_mos9.cpp
+        sim/sim_model_ngspice_data_vbic.cpp
+        sim/sim_model_r_pot.cpp
+        sim/sim_model_raw_spice.cpp
+        sim/sim_model_source.cpp
+        sim/sim_model_multiunit.cpp
+        sim/sim_model_spice.cpp
+        sim/sim_model_spice_fallback.cpp
+        sim/sim_model_subckt.cpp
+        sim/sim_model_switch.cpp
+        sim/sim_model_tline.cpp
+        sim/sim_model_xspice.cpp
+        sim/sim_value.cpp
+        sim/spice_settings.cpp
+        sim/spice_generator.cpp
+        sim/spice_library_parser.cpp
+        sim/spice_model_parser.cpp
+        sim/spice_circuit_model.cpp
+        sim/spice_value.cpp
+        sim/kibis/ibis_parser.cpp
+        sim/kibis/kibis.cpp
+        )
+
+    list( APPEND EESCHEMA_SRCS ${EESCHEMA_HEADLESS_KEEP} )
+
+    # EESCHEMA_PRINTING is passed to the object library separately, and is entirely
+    # the print dialog and the wxPrintout implementation.
+    set( EESCHEMA_PRINTING )
+
+    # The KIFACE itself.  In the dynamic build eeschema.cpp is compiled separately into
+    # the .kiface module; here it joins the object set, with its GUI half compiled out
+    # by the KICAD_HEADLESS_API guards inside it.  The Kiface/KIFACE_GETTER renaming
+    # below is what lets it coexist with pcbnew's copy in one image.
+    list( APPEND EESCHEMA_SRCS eeschema.cpp )
+endif()
+
 if( WIN32 )
     if( MINGW )
         # EESCHEMA_RESOURCES variable is set by the macro.
@@ -618,6 +787,8 @@ set_source_files_properties( dialogs/dialog_user_defined_signals.cpp
         OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/sim/user_defined_signals_help_md.h
     )
 
+if( NOT KICAD_HEADLESS_API )
+
 if( APPLE )
     # setup bundle
     set( EESCHEMA_RESOURCES eeschema.icns eeschema_doc.icns libedit.icns libedit_doc.icns )
@@ -649,6 +820,8 @@ target_link_libraries( eeschema
     ${wxWidgets_LIBRARIES}
     )
 
+endif() # NOT KICAD_HEADLESS_API
+
 # the main Eeschema program, in DSO form.
 add_library( eeschema_kiface_objects OBJECT
     ${EESCHEMA_SRCS}
@@ -678,24 +851,49 @@ target_include_directories( eeschema_kiface_objects
         netlist_exporters
      )
 
+# pcm is only reached from dialogs/panel_sch_data_sources.cpp, which the headless
+# build drops, and it lives under kicad/ which the headless build does not add.
+if( KICAD_HEADLESS_API )
+    set( EESCHEMA_KIFACE_OPTIONAL_LIBS "" )
+else()
+    set( EESCHEMA_KIFACE_OPTIONAL_LIBS pcm )
+endif()
+
+if( KICAD_HEADLESS_API )
+    set( EESCHEMA_OLE_LIBS "" )
+else()
+    set( EESCHEMA_OLE_LIBS libwmf_orcad emf2svg )
+endif()
+
 target_link_libraries( eeschema_kiface_objects
     PUBLIC
         common
-        libwmf_orcad
-        emf2svg
+        ${EESCHEMA_OLE_LIBS}
         pads_common
-        pcm )
+        ${EESCHEMA_KIFACE_OPTIONAL_LIBS} )
 
 # Since we're not using target_link_libraries, we need to explicitly
 # declare the dependency
 add_dependencies( eeschema_kiface_objects common )
 
-message( STATUS "Including 3Dconnexion SpaceMouse navigation support in eeschema" )
-add_subdirectory( navlib )
+if( NOT KICAD_HEADLESS_API )
+    message( STATUS "Including 3Dconnexion SpaceMouse navigation support in eeschema" )
+    add_subdirectory( navlib )
 
-target_link_libraries( eeschema_kiface_objects PUBLIC eeschema_navlib)
+    target_link_libraries( eeschema_kiface_objects PUBLIC eeschema_navlib)
 
-add_dependencies( eeschema_kiface_objects eeschema_navlib )
+    add_dependencies( eeschema_kiface_objects eeschema_navlib )
+endif()
+
+if( KICAD_HEADLESS_API )
+    # Rename the single-kiface-per-module entry points so that the pcbnew and
+    # eeschema object sets can be linked into one image.  See common/kiway.cpp.
+    target_compile_definitions( eeschema_kiface_objects PRIVATE
+        Kiface=KifaceSch
+        KIFACE_GETTER=KifaceGetterSch )
+endif()
+
+if( NOT KICAD_HEADLESS_API )
 
 add_library( eeschema_kiface MODULE
     eeschema.cpp
@@ -825,6 +1023,9 @@ if( KICAD_WIN32_INSTALL_PDBS )
     install(FILES $<TARGET_PDB_FILE:eeschema_kiface> DESTINATION ${KICAD_KIFACE})
 endif()
 
+endif() # NOT KICAD_HEADLESS_API
+
+# The lexers feed eeschema_kiface_objects, so they are needed in both builds.
 make_lexer(
     eeschema_kiface_objects
     dialogs/dialog_bom_cfg.keywords
@@ -841,4 +1042,6 @@ make_lexer(
     TSCHEMATIC_T
     )
 
-add_subdirectory( python_scripts )
+if( NOT KICAD_HEADLESS_API )
+    add_subdirectory( python_scripts )
+endif()

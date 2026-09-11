@@ -54,14 +54,28 @@ add_subdirectory( fmt )
 add_subdirectory( glad )
 add_subdirectory( gzip-hpp )
 add_subdirectory( lemon )
-add_subdirectory( libcontext )
-add_subdirectory( libemf2svg )
+# libcontext is the coroutine stack switcher (hand-written assembly).  The headless
+# build uses the run-to-completion COROUTINE stand-in instead; see coroutine_sync.h.
+if( NOT KICAD_HEADLESS_API )
+    add_subdirectory( libcontext )
+endif()
+# libemf2svg links Fontconfig and libwmf is only reached from eeschema's OLE image
+# helpers; both are dropped under the headless option along with sch_io/ole_*.cpp.
+if( NOT KICAD_HEADLESS_API )
+    add_subdirectory( libemf2svg )
+endif()
 add_subdirectory( libpopcnt )
-add_subdirectory( libwmf )
+if( NOT KICAD_HEADLESS_API )
+    add_subdirectory( libwmf )
+endif()
 add_subdirectory( magic_enum )
 add_subdirectory( markdown2html )
 add_subdirectory( nanoflann )
-add_subdirectory( nanodbc )
+# nanodbc is only reached from common/database/database_connection.cpp, which the
+# headless build drops.
+if( NOT KICAD_HEADLESS_API )
+    add_subdirectory( nanodbc )
+endif()
 add_subdirectory( nanosvg )
 add_subdirectory( rectpack2d )
 add_subdirectory( rtree )
@@ -75,5 +89,16 @@ add_subdirectory( pegtl )
 add_subdirectory( 3dxware_sdk )
 add_subdirectory( rapidcsv )
 add_subdirectory( turtle )
+# The headless core runs every task on the calling thread; compat/inline-thread-pool
+# provides a header-compatible facade in place of the real BS::thread_pool.  Selected
+# by pointing the same INTERFACE target at a different include directory, so no call
+# site changes.
 add_subdirectory( thread-pool )
+
+if( KICAD_HEADLESS_API )
+    set_target_properties( thread-pool PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/compat/inline-thread-pool
+        INTERFACE_SOURCES ${CMAKE_SOURCE_DIR}/compat/inline-thread-pool/bs_thread_pool.hpp
+        )
+endif()
 add_subdirectory( zint )
