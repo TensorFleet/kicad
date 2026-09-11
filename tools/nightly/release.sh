@@ -70,33 +70,52 @@ previous="$WORK/previous-manifest.json"
 if release_exists nightly; then
   gh release download nightly --pattern manifest.json --output "$previous" 2>/dev/null || true
 fi
-manifest --release-tag nightly --stable-names --merge "$previous" --out "$ROLLING/manifest.json"
 
-# SHA256SUMS of the rolling release covers every listed asset, tonight's and the kept ones.
-python3 - "$ROLLING/manifest.json" > "$ROLLING/SHA256SUMS" <<'EOF'
+# A build of a commit *behind* the one the rolling release carries is a backfill for a
+# consumer's pin (workflow_dispatch with an old `ref`), not the latest: it gets its dated
+# release above but must not move `nightly` backwards.
+update_rolling=true
+if [ -s "$previous" ]; then
+  prev_sha="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["commit"])' "$previous")"
+  if [ "$prev_sha" != "$NIGHTLY_SHA" ]; then
+    status="$(gh api "repos/$GH_REPO/compare/$prev_sha...$NIGHTLY_SHA" --jq .status 2>/dev/null || echo unknown)"
+    if [ "$status" = "behind" ]; then
+      echo "built $NIGHTLY_SHA is behind the rolling release's $prev_sha (backfill); leaving nightly as it is"
+      update_rolling=false
+    fi
+  fi
+fi
+
+if [ "$update_rolling" = true ]; then
+  manifest --release-tag nightly --stable-names --merge "$previous" --out "$ROLLING/manifest.json"
+
+  # SHA256SUMS of the rolling release covers every listed asset, tonight's and the kept ones.
+  python3 - "$ROLLING/manifest.json" > "$ROLLING/SHA256SUMS" <<'PYEOF'
 import json, sys
 m = json.load(open(sys.argv[1]))
 for a in m["assets"].values():
     print(f"{a['sha256']}  {a['file']}")
-EOF
-python3 "$HERE/manifest.py" notes "$ROLLING/manifest.json" > "$WORK/rolling-notes.md"
+PYEOF
+  python3 "$HERE/manifest.py" notes "$ROLLING/manifest.json" > "$WORK/rolling-notes.md"
 
-rolling_title="kicad-cli nightly (latest: $NIGHTLY_DATE, $SHORT)"
-if release_exists nightly; then
-  gh release upload nightly --clobber "$ROLLING"/*
-  gh release edit nightly --prerelease --title "$rolling_title" --notes-file "$WORK/rolling-notes.md"
-  # Move the tag; `gh release edit --target` only applies to releases whose tag does not exist yet.
-  gh api -X PATCH "repos/$GH_REPO/git/refs/tags/nightly" -f sha="$NIGHTLY_SHA" -F force=true >/dev/null
-else
-  gh release create nightly --prerelease --target "$NIGHTLY_SHA" \
-    --title "$rolling_title" --notes-file "$WORK/rolling-notes.md" "$ROLLING"/*
+  rolling_title="kicad-cli nightly (latest: $NIGHTLY_DATE, $SHORT)"
+  if release_exists nightly; then
+    gh release upload nightly --clobber "$ROLLING"/*
+    gh release edit nightly --prerelease --title "$rolling_title" --notes-file "$WORK/rolling-notes.md"
+    # Move the tag; `gh release edit --target` only applies to releases whose tag does not exist yet.
+    gh api -X PATCH "repos/$GH_REPO/git/refs/tags/nightly" -f sha="$NIGHTLY_SHA" -F force=true >/dev/null
+  else
+    gh release create nightly --prerelease --target "$NIGHTLY_SHA" \
+      --title "$rolling_title" --notes-file "$WORK/rolling-notes.md" "$ROLLING"/*
+  fi
+  echo "updated rolling release nightly -> $NIGHTLY_SHA"
 fi
-echo "updated rolling release nightly -> $NIGHTLY_SHA"
 
 # ------------------------------------------------------------------ 3. prune (by age only)
 cutoff="$(date -u -d "-${KEEP_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)"
+# (gh's --jq takes a bare expression, no --arg; the timestamps compare as ISO-8601 strings)
 gh release list --limit 500 --json tagName,createdAt \
-  --jq --arg cutoff "$cutoff" '.[] | select(.tagName | startswith("nightly-")) | select(.createdAt < $cutoff) | .tagName' \
+  --jq ".[] | select(.tagName | startswith(\"nightly-\")) | select(.createdAt < \"$cutoff\") | .tagName" \
   | while read -r old; do
       [ -n "$old" ] || continue
       echo "pruning $old (older than $KEEP_DAYS days)"
@@ -109,5 +128,5 @@ gh release list --limit 500 --json tagName,createdAt \
   echo "- release: https://github.com/$GH_REPO/releases/tag/$NIGHTLY_TAG"
   echo "- rolling: https://github.com/$GH_REPO/releases/tag/nightly"
   echo
-  cat "$WORK/rolling-notes.md"
+  cat "$WORK/rolling-notes.md" 2>/dev/null || cat "$WORK/dated-notes.md"
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
