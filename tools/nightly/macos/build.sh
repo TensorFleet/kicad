@@ -46,6 +46,8 @@ cmake -S "$SRC" -B "$BUILD_DIR" -G Ninja \
   -DKICAD_USE_PCH=ON
 
 # cvpcb: eeschema's ERC (and footprint assignment) loads the cvpcb kiface at run time.
-ninja -C "$BUILD_DIR" -j"$JOBS" kicad-cli pcbnew_kiface eeschema_kiface cvpcb_kiface
+# The ray-traced PCB renderer dlopens these loaders; linking OCCT into pcbnew is not enough.
+ninja -C "$BUILD_DIR" -j"$JOBS" kicad-cli pcbnew_kiface eeschema_kiface cvpcb_kiface \
+  s3d_plugin_oce s3d_plugin_vrml s3d_plugin_idf
 
 command -v ccache >/dev/null && ccache --show-stats || true
