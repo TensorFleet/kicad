@@ -144,6 +144,10 @@ sha="${NIGHTLY_SHA:-$(git -C "$SRC" rev-parse HEAD)}"
 version="${NIGHTLY_VERSION:-$(git -C "$SRC" describe --match '[0-9]*' --always)}"
 echo "$sha" > "$OUT/KICAD_COMMIT"
 echo "$version" > "$OUT/VERSION"
+# Retain the source tree's license notices with the added GPL model loaders.
+mkdir -p "$OUT/licenses"
+cp "$SRC"/LICENSE* "$SRC/AUTHORS.txt" "$OUT/licenses/"
+printf 'KiCad source revision: %s\nhttps://github.com/fabPlane/kicad/tree/%s\n' "$sha" "$sha" > "$OUT/licenses/SOURCE.txt"
 
 echo "staged $OUT: $(ls "$FW" | wc -l | tr -d ' ') libraries in Frameworks, $(du -sh "$OUT" | cut -f1)"
 bash "$HERE/../smoke.sh" "$OUT/kicad-cli" "$SRC"
