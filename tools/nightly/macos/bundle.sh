@@ -31,11 +31,15 @@ MACOS="$APP/Contents/MacOS"
 PLUGINS="$APP/Contents/PlugIns"
 FW="$APP/Contents/Frameworks"
 SUPPORT="$APP/Contents/SharedSupport"
-mkdir -p "$MACOS" "$PLUGINS" "$FW" "$SUPPORT"
+mkdir -p "$MACOS" "$PLUGINS/3d" "$FW" "$SUPPORT"
 
 cp "$APP_SRC/Contents/MacOS/kicad-cli" "$MACOS/"
 cp "$APP_SRC/Contents/PlugIns/_pcbnew.kiface" "$APP_SRC/Contents/PlugIns/_eeschema.kiface" \
    "$APP_SRC/Contents/PlugIns/_cvpcb.kiface" "$PLUGINS/"
+# Use only loaders from this exact build, never another installed KiCad version.
+for loader in oce vrml idf; do
+  cp "$APP_SRC/Contents/PlugIns/3d/libs3d_plugin_$loader.so" "$PLUGINS/3d/"
+done
 cp "$APP_SRC"/Contents/Frameworks/libki*.dylib "$FW/"
 [ -f "$APP_SRC/Contents/Info.plist" ] && cp "$APP_SRC/Contents/Info.plist" "$APP/Contents/"
 cp -R "$SRC/api/schemas" "$SUPPORT/schemas"
@@ -72,7 +76,7 @@ resolve() {
 }
 
 # ---- collect the closure of Homebrew (and other non-system) libraries into Frameworks
-queue=("$MACOS/kicad-cli" "$PLUGINS"/*.kiface "$FW"/*.dylib)
+queue=("$MACOS/kicad-cli" "$PLUGINS"/*.kiface "$PLUGINS/3d"/*.so "$FW"/*.dylib)
 while [ ${#queue[@]} -gt 0 ]; do
   f="${queue[${#queue[@]}-1]}"
   unset 'queue[${#queue[@]}-1]'
@@ -104,6 +108,7 @@ fix() {
   case "$kind" in
     exe)   install_name_tool -add_rpath "@executable_path/../Frameworks" "$f" ;;
     plugin) install_name_tool -add_rpath "@loader_path/../Frameworks" "$f" ;;
+    model) install_name_tool -add_rpath "@loader_path/../../Frameworks" "$f" ;;
     lib)   install_name_tool -id "@rpath/$(basename "$f")" "$f"
            # dyld also searches the rpaths of the executable that (transitively) loaded a
            # library, so this one is a convenience; a bottle linked without header padding
@@ -116,10 +121,11 @@ fix() {
 
 for f in "$FW"/*.dylib; do fix "$f" lib; done
 for f in "$PLUGINS"/*.kiface; do fix "$f" plugin; done
+for f in "$PLUGINS/3d"/*.so; do fix "$f" model; done
 fix "$MACOS/kicad-cli" exe
 
 # Nothing may still point at Homebrew or the build tree.
-if otool -L "$MACOS/kicad-cli" "$PLUGINS"/*.kiface "$FW"/*.dylib | grep -E "$BREW|$BUILD"; then
+if otool -L "$MACOS/kicad-cli" "$PLUGINS"/*.kiface "$PLUGINS/3d"/*.so "$FW"/*.dylib | grep -E "$BREW|$BUILD"; then
   echo "unrelocated load commands remain" >&2
   exit 1
 fi
@@ -141,3 +147,4 @@ echo "$version" > "$OUT/VERSION"
 
 echo "staged $OUT: $(ls "$FW" | wc -l | tr -d ' ') libraries in Frameworks, $(du -sh "$OUT" | cut -f1)"
 bash "$HERE/../smoke.sh" "$OUT/kicad-cli" "$SRC"
+python3 "$HERE/smoke-model-loaders.py" "$OUT/kicad-cli" "$SRC"

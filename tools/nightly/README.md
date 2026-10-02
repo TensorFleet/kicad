@@ -111,7 +111,7 @@ kicad-cli/bin/kicad-cli.exe          Windows: run this
 kicad-cli/KICAD_COMMIT  VERSION      provenance
 
 Linux    bin/{kicad-cli,_pcbnew.kiface,_eeschema.kiface,_cvpcb.kiface}  lib/*.so*  share/kicad/{schemas,template}
-macOS    KiCad.app/Contents/{MacOS/kicad-cli, PlugIns/*.kiface, Frameworks/*.dylib, SharedSupport/}
+macOS    KiCad.app/Contents/{MacOS/kicad-cli, PlugIns/*.kiface, PlugIns/3d/*.so, Frameworks/*.dylib, SharedSupport/}
 Windows  bin/{kicad-cli.exe,_pcbnew.dll,_eeschema.dll,_cvpcb.dll,ki*.dll,<vcpkg + MSVC runtime>.dll}  share/kicad/
 ```
 
@@ -175,3 +175,7 @@ two hours (the Apple-silicon runners have three cores); `ccache` is saved to the
 cache right after the compile, so a failure in a later step does not lose it. The repository is public, so the
 standard runners are free; a `linux-arm64` row on `ubuntu-24.04-arm` would work as is if
 ARM Linux hosts become a target.
+
+### macOS model loaders
+
+Mac archives build the STEP/IGES (OCE), VRML/X3D and IDF model loaders from the same source commit as the CLI. They live in `KiCad.app/Contents/PlugIns/3d`; their dependency closure is relocated into Frameworks and each loader is signed. Packaging checks their ABI/signatures and renders both a local VRML cube and the source tree’s STEP fixture against a model-free baseline, rejecting successful-but-empty component renders. This does not bundle the external stock footprint/model libraries.
