@@ -94,6 +94,7 @@ while [ ${#queue[@]} -gt 0 ]; do
 done
 
 # ---- rewrite load commands and rpaths, then sign
+python3 "$HERE/deduplicate-libraries.py" "$FW"
 fix() {
   local f="$1" kind="$2" dep base rp
   while read -r dep; do
@@ -119,7 +120,7 @@ fix() {
   codesign --force --sign - "$f" 2>/dev/null
 }
 
-for f in "$FW"/*.dylib; do fix "$f" lib; done
+for f in "$FW"/*.dylib; do [ -L "$f" ] || fix "$f" lib; done
 for f in "$PLUGINS"/*.kiface; do fix "$f" plugin; done
 for f in "$PLUGINS/3d"/*.so; do fix "$f" model; done
 fix "$MACOS/kicad-cli" exe

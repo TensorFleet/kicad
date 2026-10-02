@@ -179,3 +179,5 @@ ARM Linux hosts become a target.
 ### macOS model loaders
 
 Mac archives build the STEP/IGES (OCE), VRML/X3D and IDF model loaders from the same source commit as the CLI. They live in `KiCad.app/Contents/PlugIns/3d`; their dependency closure is relocated into Frameworks and each loader is signed. Packaging checks their ABI/signatures and renders both a local VRML cube and the source tree’s STEP fixture against a model-free baseline, rejecting successful-but-empty component renders. This does not bundle the external stock footprint/model libraries.
+
+On macOS, short/full wxWidgets version names with the same Mach-O source UUID and CPU remain relative symlink aliases of one dylib. This avoids loading duplicate Objective-C classes. The render smoke test rejects duplicate-runtime warnings. Desktop consumers of older archives must preserve these relative aliases when staging and packaging.

@@ -91,6 +91,7 @@ def verify_render(cli, source):
             output = temp / f"{label}.png"
             result = subprocess.run([str(cli), "pcb", "render", "--width", "320", "--height", "240", "--side", "top", "--quality", "high", "--background", "opaque", "--zoom", "0.7", "--output", str(output), str(board)], env=env, capture_output=True, text=True)
             assert result.returncode == 0, result.stdout + result.stderr
+            assert "implemented in both" not in result.stderr, "duplicate wxWidgets runtime images"
             return pixels(output)
         baseline = render("without-model")
         for label, fixture in (("vrml", model), ("step", step)):
